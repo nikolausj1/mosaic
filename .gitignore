@@ -16,3 +16,6 @@ build/
 
 # Secrets
 .env
+
+# Prototype test photos - personal, never committed (public repo)
+Sources/Resources/Prototype/
