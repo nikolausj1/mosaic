@@ -49,6 +49,19 @@ struct EditorView: View {
         VStack(spacing: 0) {
             topBar
             ZStack {
+                // Dead-space deselect (bug fix, Justin 2026-07-17): the
+                // canvas's own gesture surface only extends 40pt beyond the
+                // canvas rect, so taps in the large empty areas above/below
+                // it never reached classifyTouch's .empty -> deselect path.
+                // This catcher sits BEHIND CanvasView: SwiftUI hit-testing
+                // gives the canvas's contentShape first claim, and anything
+                // outside it lands here.
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        state.selection = nil
+                        withAnimation(.easeInOut(duration: 0.2)) { state.activeTray = .none }
+                    }
                 CanvasView(state: state, onReady: applyFirstLaunchSelectionIfNeeded)
                 if state.isExporting {
                     // PRD: "Exporting: canvas locked." Rather than touching
@@ -63,7 +76,33 @@ struct EditorView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            EditorBottomBar(state: state, onReplace: { photoID in replaceTarget = photoID })
+            .overlay(alignment: .bottom) {
+                // Photo context strip (design revision, Justin 2026-07-17):
+                // floats over the dead space between canvas and document
+                // bar so selecting a photo never resizes the canvas. The
+                // document bar below stays fully usable alongside it.
+                if state.selection != nil {
+                    HStack(spacing: 0) {
+                        PhotoToolbarView(state: state, onReplace: { photoID in replaceTarget = photoID })
+                        Button {
+                            state.selection = nil
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Color.white.opacity(0.55))
+                                .frame(width: 40, height: 44)
+                        }
+                    }
+                    .background(Color.mosaicSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .shadow(color: .black.opacity(0.4), radius: 10, y: 2)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: state.selection != nil)
+            EditorBottomBar(state: state, onReplace: { _ in })
         }
         .background(Color.mosaicBackground.ignoresSafeArea())
         .overlay(alignment: .bottom) { debugHUD }
@@ -88,10 +127,8 @@ struct EditorView: View {
             Text(message)
         }
         .onChange(of: state.selection) { _, newSelection in
-            // Trays only ever show in the no-selection state; selecting a
-            // photo swaps the whole bottom bar to the photo toolbar, so any
-            // open tray is stale the instant a selection lands.
-            if newSelection != nil { state.activeTray = .none }
+            // Design revision 2026-07-17: trays and the photo strip may
+            // coexist (document-level trays no longer close on selection).
             // Phase 6: selecting an unavailable photo (placeholder cell tap)
             // opens the Replace sheet directly, via the same selection
             // mechanism a normal photo tap already uses - no gesture/hit-test
@@ -180,7 +217,7 @@ struct EditorView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.black.opacity(0.5))
         .allowsHitTesting(false)
-        .offset(y: -84) // clear the bottom bar
+        .offset(y: -170) // clear the bottom bar + floating photo strip
     }
 
     private var topBar: some View {

@@ -1,10 +1,10 @@
 // Sources/App/Prototype/BottomBar/EditorBottomBar.swift
-// The persistent, contextual bottom bar (Phase 4). Nothing selected: three
-// tabs (Layout/Ratio/Border) that each raise a tray above the bar. A photo
-// selected: the single-tap photo toolbar (Auto/Flip H/Flip V/Rotate/
-// Replace/Remove), no trays. Only one tray is ever open at a time, and
-// selection changes are handled by EditorView's `.onChange(of: state.selection)`
-// (closing the tray without touching GestureController).
+// The persistent DOCUMENT bar (design revision, Justin, 2026-07-17):
+// Layout/Ratio/Border tabs + their trays are ALWAYS visible - document-
+// level tools must never disappear behind a photo-level mode (the same
+// argument the PRD used to pin Save to the top bar). The photo toolbar
+// now lives in EditorView's floating strip between the canvas and this
+// bar, so both can be on screen at once.
 import SwiftUI
 
 struct EditorBottomBar: View {
@@ -16,40 +16,24 @@ struct EditorBottomBar: View {
     var body: some View {
         VStack(spacing: 0) {
             trayContent
-            bar
+            tabsBar
         }
-        // A tap anywhere on the canvas (photo or dead space) closes a tray -
-        // GestureController itself is off-limits this phase, so this rides
-        // alongside it rather than through it.
     }
 
     @ViewBuilder
     private var trayContent: some View {
-        if state.selection == nil {
-            switch state.activeTray {
-            case .none:
-                EmptyView()
-            case .layout:
-                LayoutTrayView(state: state)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            case .ratio:
-                RatioTrayView(state: state)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            case .border:
-                BorderTrayView(state: state)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var bar: some View {
-        if state.selection != nil {
-            PhotoToolbarView(state: state, onReplace: onReplace)
-                .transition(.opacity)
-        } else {
-            tabsBar
-                .transition(.opacity)
+        switch state.activeTray {
+        case .none:
+            EmptyView()
+        case .layout:
+            LayoutTrayView(state: state)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        case .ratio:
+            RatioTrayView(state: state)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        case .border:
+            BorderTrayView(state: state)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
 

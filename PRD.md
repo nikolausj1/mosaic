@@ -166,10 +166,10 @@ The whole app. Dark chrome.
 - Top bar: **New** (left) | **Undo**, **Redo** | **Save** (right, accent-colored). New confirms ("Discard current collage?") - it is the one action undo cannot save you from.
   - **Save lives in the top bar, not the bottom one, and this is load-bearing:** the bottom bar is contextual, so a Save button down there would disappear whenever a photo was selected, forcing a deselect just to find it. Layout put SAVE in its header for the same reason. Save must be reachable from every state.
 - Canvas: centered in the available space, scaled to fit, generous dead space around it. **Composition brackets sit just outside the canvas corners, permanently visible** whether or not a photo is selected.
-- Bottom bar (contextual):
-  - **Nothing selected:** `Layout` | `Ratio` | `Border`. Each raises a tray above the bar.
-  - **A photo selected:** `Auto` | `Flip H` | `Flip V` | `Rotate` | `Replace` | `Remove`. All single-tap actions, no trays. `Auto` renders in the accent color when lit and dim when not (Layout used exactly this active-state convention). Six tiles is tight on the narrowest supported devices - **let the bar scroll horizontally rather than shrinking the touch targets**; Layout's did the same at four.
-  - Deselect by tapping the dead space around the canvas.
+- Bottom bar — **REVISED (Justin, 2026-07-17, on device):** the original contextual bar (photo tools replacing the tabs on selection) hid document-level tools behind a photo-level mode. The same argument that pinned Save to the top bar applies to Layout/Ratio/Border, so:
+  - **Document bar, always visible:** `Layout` | `Ratio` | `Border`. Each raises a tray above the bar. Trays may stay open while a photo is selected (document-level controls are never gated on selection).
+  - **Photo context strip, floating:** on selection, `Auto` | `Flip H` | `Flip V` | `Rotate` | `Replace` | `Remove` (+ a small ✕ to deselect) appears in the dead space between canvas and document bar - an overlay, so **selecting a photo never resizes the canvas**. Horizontally scrollable rather than shrinking touch targets. `Auto` renders accent when lit, dim when not.
+  - Deselect by tapping the dead space around the canvas (anywhere in the canvas area, not just near the canvas), or the strip's ✕.
 
 **Trays:**
 - **Layout** - a horizontally scrolling row of glyphs showing every topology for the current photo count. Tapping one changes the topology; photos keep their identity and crops where the cells map, and split fractions reset to even.

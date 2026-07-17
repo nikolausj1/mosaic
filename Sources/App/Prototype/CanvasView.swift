@@ -86,18 +86,9 @@ struct CanvasView: View {
                 .onChanged { controller?.magnifyChanged($0) }
                 .onEnded { controller?.magnifyEnded($0) }
         )
-        .simultaneousGesture(
-            // Phase 4: closes an open Layout/Ratio/Border tray on any tap
-            // (dead space OR a photo) when nothing is selected. Selecting a
-            // photo already closes the tray via EditorView's
-            // `.onChange(of: state.selection)`; this covers the dead-space
-            // case, where selection stays nil so that onChange never fires.
-            // Purely additive/side-effect-only - doesn't touch
-            // GestureController or the selection/pan/swap state machine.
-            TapGesture().onEnded {
-                if state.selection == nil { state.activeTray = .none }
-            }
-        )
+        // (Design revision 2026-07-17: the Phase 4 tap-closes-tray gesture
+        // is gone - trays are document-level and now coexist with selection;
+        // EditorView's dead-space catcher handles deselect + tray dismissal.)
     }
 
     // MARK: - Photo rendering
