@@ -62,13 +62,18 @@ struct CanvasView: View {
                 photoCell(cell)
             }
 
-            if let selection = state.selection,
-               let cell = cells.first(where: { $0.id == selection }),
-               let path = leafPath(for: selection, in: state.document.root) {
-                selectionOverlay(cell: cell, path: path, gutterPts: gutterPts)
-            }
+            // Overlay chrome hides while a border slider is live so the
+            // border itself is visible (accent capsules/outline sit exactly
+            // on the seams being adjusted).
+            if !state.isAdjustingBorder {
+                if let selection = state.selection,
+                   let cell = cells.first(where: { $0.id == selection }),
+                   let path = leafPath(for: selection, in: state.document.root) {
+                    selectionOverlay(cell: cell, path: path, gutterPts: gutterPts)
+                }
 
-            bracketsOverlay
+                bracketsOverlay
+            }
 
             if let swap = state.swapState {
                 swapOverlay(swap: swap, cells: cells)

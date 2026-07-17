@@ -67,6 +67,12 @@ final class EditorState {
     }
     var activeTray: ActiveTray = .none
 
+    /// True only while a border-tray slider drag is live. CanvasView hides
+    /// the selection overlay chrome and composition brackets for the
+    /// duration so the border being adjusted is actually visible under the
+    /// finger (Justin, 2026-07-17).
+    var isAdjustingBorder = false
+
     // MARK: - Border swatches (design revision, 2026-07-17)
 
     /// Three colors sampled from every photo's downsampled pixels (see

@@ -49,6 +49,7 @@ struct BorderTrayView: View {
                 .foregroundStyle(.white.opacity(0.7))
                 .frame(width: 72, alignment: .leading)
             Slider(value: value, in: 0...100, onEditingChanged: { editing in
+                withAnimation(.easeInOut(duration: 0.15)) { state.isAdjustingBorder = editing }
                 if editing { state.beginGesture() } else { state.commitGesture() }
             })
             .tint(Color.mosaicAccent)
