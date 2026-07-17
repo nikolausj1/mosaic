@@ -32,6 +32,15 @@ final class EditorState {
     let photoStore: PhotoStore
     private(set) var layoutIndex: Int
 
+    // MARK: - Export / Save (Phase 5)
+
+    /// True for the duration of a Save: gates the canvas (EditorView overlays
+    /// a full-screen touch blocker while this is true - see its doc comment
+    /// - rather than reaching into GestureController.swift/CanvasView.swift)
+    /// and shows a spinner in place of the Save button's label.
+    var isExporting = false
+    let saveCoordinator = SaveCoordinator()
+
     static let undoCap = 50
 
     // MARK: - Bottom bar / tray state (Phase 4)

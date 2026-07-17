@@ -668,6 +668,78 @@ do {
 }
 
 // =====================================================================
+// Phase 5 - ExportPlan: requiredThumbnailMaxPixelSize / exportCellPlans
+// =====================================================================
+do {
+    // Cell exactly matches image aspect, zoom 1: needs decode == cell's own
+    // pixel span (no more, no less) - the "never decode 48MP for an 800px
+    // cell" case.
+    let size1 = requiredThumbnailMaxPixelSize(
+        cellSize: CGSize(width: 800, height: 600),
+        photoPixelWidth: 4000, photoPixelHeight: 3000,
+        quarterTurns: 0, zoom: 1.0
+    )
+    check(size1 == 800, "ExportPlan: matching-aspect zoom-1 needs decode == 800 (cell span, not 4000 native)")
+
+    // Doubling the cell size doubles the required decode.
+    let size2 = requiredThumbnailMaxPixelSize(
+        cellSize: CGSize(width: 1600, height: 1200),
+        photoPixelWidth: 4000, photoPixelHeight: 3000,
+        quarterTurns: 0, zoom: 1.0
+    )
+    check(size2 == 1600, "ExportPlan: doubled cell doubles required decode size")
+
+    // Clamped: never exceeds the source's own native max dimension, even if
+    // the math would ask for more (e.g. a huge cell against a tiny photo).
+    let size3 = requiredThumbnailMaxPixelSize(
+        cellSize: CGSize(width: 5000, height: 5000),
+        photoPixelWidth: 400, photoPixelHeight: 400,
+        quarterTurns: 0, zoom: 1.0
+    )
+    check(size3 == 400, "ExportPlan: decode target clamped to the source's own native max dimension")
+
+    // Odd quarterTurns swap the effective axes used for the fill-scale
+    // computation (mirrors clampedCenter/fillScale's own odd-turn handling).
+    let size4 = requiredThumbnailMaxPixelSize(
+        cellSize: CGSize(width: 600, height: 800),
+        photoPixelWidth: 4000, photoPixelHeight: 3000,
+        quarterTurns: 1, zoom: 1.0
+    )
+    check(size4 == 800, "ExportPlan: quarterTurns=1 uses the rotated (effective) aspect for fill-scale")
+
+    // Zooming in (tighter crop) lowers the required decode - the visible
+    // native region is smaller than at zoom 1.
+    let size5 = requiredThumbnailMaxPixelSize(
+        cellSize: CGSize(width: 800, height: 600),
+        photoPixelWidth: 4000, photoPixelHeight: 3000,
+        quarterTurns: 0, zoom: 2.0
+    )
+    check(size5 == 1600, "ExportPlan: zoom 2 doubles the decode target relative to zoom 1 (still well under native)")
+}
+
+do {
+    // exportCellPlans: solves directly at export size and pairs each cell
+    // with its decode target - a 2-up document at a concrete export size.
+    let a = PhotoID()
+    let b = PhotoID()
+    let root = Node.split(axis: .horizontal, fractions: [0.5, 0.5], children: [.leaf(a), .leaf(b)])
+    var photos: [PhotoID: PhotoRef] = [:]
+    photos[a] = makePhoto(w: 4000, h: 4000, zoom: 1)
+    photos[b] = makePhoto(w: 4000, h: 4000, zoom: 1)
+    let doc = Document(canvasRatio: .square, root: root, photos: photos, border: .none)
+    let exportSize = CGSize(width: 2000, height: 1000)
+
+    let plans = exportCellPlans(doc: doc, exportSize: exportSize)
+    check(plans.count == 2, "exportCellPlans: one plan per photo cell")
+    if let planA = plans.first(where: { $0.id == a }) {
+        check(near(Double(planA.rect.width), 1000, 0.5), "exportCellPlans: cellA rect matches solve() at export size")
+        check(planA.thumbnailMaxPixelSize == 1000, "exportCellPlans: cellA decode target matches its own cell span")
+    } else {
+        check(false, "exportCellPlans: expected a plan for photo a")
+    }
+}
+
+// =====================================================================
 // Summary
 // =====================================================================
 print("\(passed) passed, \(failed) failed")

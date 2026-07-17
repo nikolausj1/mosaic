@@ -20,7 +20,19 @@ struct ContentView: View {
     var body: some View {
         Group {
             if let editorState {
-                EditorView(state: editorState, onNew: { self.editorState = nil })
+                EditorView(
+                    state: editorState,
+                    onNew: { self.editorState = nil },
+                    // Phase 5: non-nil enables the Save button (EditorView's
+                    // own performSave() owns the actual export+save
+                    // mechanics); this hook is just an informational
+                    // completion signal for future bookkeeping.
+                    onSave: {},
+                    // Screen C's Done button: dismiss back to the Picker.
+                    // Phase 6 wires "last collage" archiving on top of this
+                    // same hook.
+                    onDone: { self.editorState = nil }
+                )
             } else {
                 PickerView(state: pickerState) { doc, images in
                     editorState = EditorState(document: doc, images: images, photoStore: PhotoStore(), layoutIndex: 0)

@@ -8,24 +8,59 @@
 // document-construction logic itself.
 import SwiftUI
 import Photos
+#if DEBUG
+import os
+#endif
+
+#if DEBUG
+private let debugExportLogger = Logger(subsystem: "com.levelup.mosaic", category: "export-debug")
+#endif
 
 struct EditorView: View {
     @State var state: EditorState
     var onNew: (() -> Void)?
-    /// Stub this phase - always nil, so Save renders in its disabled visual
-    /// state. Phase 5 wires an actual export+save flow in here.
+    /// Phase 5: a real save handler is now wired in from ContentView (see
+    /// its doc comment there) - non-nil enables the Save button's visual
+    /// state, same gate Phase 4 used while this was always nil. The actual
+    /// export+save mechanics live in `performSave()` below; `onSave` fires
+    /// as an informational hook once a save completes successfully.
     var onSave: (() -> Void)? = nil
+    /// Fires when the user taps Done on the save sheet (Screen C). Forwarded
+    /// to ContentView, which dismisses back to the Picker (Phase 6 wires
+    /// "last collage" archiving on top of this same hook).
+    var onDone: (() -> Void)? = nil
 
     @AppStorage("hasSeenEditor") private var hasSeenEditor: Bool = false
     @State private var hasAppliedFirstLaunchSelection = false
     @State private var showDiscardConfirm = false
     @State private var replaceTarget: PhotoID?
 
+    @State private var saveResult: SaveResult?
+    @State private var showSaveSheet = false
+    @State private var saveErrorMessage: String?
+    @State private var showSaveError = false
+    #if DEBUG
+    @State private var didRunAutoSaveDebugHook = false
+    #endif
+
     var body: some View {
         VStack(spacing: 0) {
             topBar
-            CanvasView(state: state, onReady: applyFirstLaunchSelectionIfNeeded)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            ZStack {
+                CanvasView(state: state, onReady: applyFirstLaunchSelectionIfNeeded)
+                if state.isExporting {
+                    // PRD: "Exporting: canvas locked." Rather than touching
+                    // GestureController.swift/CanvasView.swift, an opaque-
+                    // to-hit-testing (visually transparent) blocker sits on
+                    // top of the whole canvas and swallows every touch for
+                    // the duration of the export.
+                    Color.white.opacity(0.0001)
+                        .contentShape(Rectangle())
+                        .onTapGesture {}
+                        .accessibilityHidden(true)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             EditorBottomBar(state: state, onReplace: { photoID in replaceTarget = photoID })
         }
         .background(Color.mosaicBackground.ignoresSafeArea())
@@ -36,6 +71,20 @@ struct EditorView: View {
         )) {
             replaceSheet
         }
+        .sheet(isPresented: $showSaveSheet) {
+            if let saveResult {
+                SaveSheetView(result: saveResult) {
+                    showSaveSheet = false
+                    onDone?()
+                }
+            }
+        }
+        .alert("Couldn't Save", isPresented: $showSaveError, presenting: saveErrorMessage) { _ in
+            Button("Retry") { Task { await performSave() } }
+            Button("Cancel", role: .cancel) {}
+        } message: { message in
+            Text(message)
+        }
         .onChange(of: state.selection) { _, newSelection in
             // Trays only ever show in the no-selection state; selecting a
             // photo swaps the whole bottom bar to the photo toolbar, so any
@@ -43,6 +92,35 @@ struct EditorView: View {
             if newSelection != nil { state.activeTray = .none }
         }
         .applyDebugUIStateLaunchArg(state: state)
+    }
+
+    // MARK: - Save (Phase 5)
+
+    /// The whole export+save flow: locks the canvas, renders off the main
+    /// thread via SaveCoordinator (CollageRenderer's CGContext pipeline),
+    /// writes to Photos, then presents the save sheet (success) or an alert
+    /// with the actual failure reason + Retry (failure). Re-entrant-safe:
+    /// a second call while one is already in flight is a no-op.
+    @MainActor
+    private func performSave() async {
+        guard !state.isExporting else { return }
+        state.isExporting = true
+        let canvasSize = state.canvasSize
+        let document = state.document
+        let images = state.images
+        let outcome = await state.saveCoordinator.save(document: document, images: images, canvasSize: canvasSize)
+        state.isExporting = false
+
+        switch outcome {
+        case .success(let result):
+            saveResult = result
+            showSaveSheet = true
+            state.haptics.thump() // PRD's "save complete" haptic - the closest existing commit-style feedback in Haptics.swift
+            onSave?()
+        case .failure(let error):
+            saveErrorMessage = error.userMessage
+            showSaveError = true
+        }
     }
 
     @ViewBuilder
@@ -110,18 +188,26 @@ struct EditorView: View {
             .disabled(state.redoStack.isEmpty)
 
             Button {
-                onSave?()
+                Task { await performSave() }
             } label: {
-                barLabel("Save")
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(onSave == nil ? Color.mosaicAccent.opacity(0.25) : Color.mosaicAccent)
-                    )
-                    .foregroundStyle(onSave == nil ? Color.white.opacity(0.4) : Color.black)
+                Group {
+                    if state.isExporting {
+                        ProgressView()
+                            .tint(.black)
+                            .frame(minWidth: 44, minHeight: 44)
+                    } else {
+                        barLabel("Save")
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(onSave == nil ? Color.mosaicAccent.opacity(0.25) : Color.mosaicAccent)
+                )
+                .foregroundStyle(onSave == nil ? Color.white.opacity(0.4) : Color.black)
             }
-            .disabled(onSave == nil)
+            .disabled(onSave == nil || state.isExporting)
         }
         .padding(.horizontal, 8)
         .foregroundStyle(Color.mosaicAccent)
@@ -138,12 +224,81 @@ struct EditorView: View {
     private func applyFirstLaunchSelectionIfNeeded() {
         guard !hasAppliedFirstLaunchSelection else { return }
         hasAppliedFirstLaunchSelection = true
+        defer {
+            #if DEBUG
+            triggerAutoSaveDebugHookIfNeeded()
+            #endif
+        }
         guard !hasSeenEditor else { return }
 
         let (cells, _) = solve(root: state.document.root, canvasSize: state.canvasSize, border: state.document.border)
         state.selection = cells.first?.id
         hasSeenEditor = true
     }
+
+    // MARK: - Debug verification hook (-autoSave launch arg, DEBUG only)
+
+    #if DEBUG
+    /// Mirrors the `-uiState` pattern: after the editor appears (canvas
+    /// sized, CanvasView's onReady fired), automatically drive the same
+    /// `performSave()` a real Save tap would - this exercises the whole
+    /// pipeline (render -> encode -> Photos write) with no simctl taps
+    /// needed. Regardless of whether the Photos-library write itself
+    /// succeeds (it may be blocked by an unresolved add-only permission
+    /// prompt on a fresh simulator), the rendered JPEG is always written to
+    /// the app container's Documents/export-debug.jpg and logged, since
+    /// `SaveError` carries the render artifact through permission/write
+    /// failures (see SaveCoordinator.RenderedArtifact).
+    private func triggerAutoSaveDebugHookIfNeeded() {
+        guard !didRunAutoSaveDebugHook else { return }
+        guard ProcessInfo.processInfo.arguments.contains("-autoSave") else { return }
+        didRunAutoSaveDebugHook = true
+        Task { await runAutoSaveDebugHook() }
+    }
+
+    private func runAutoSaveDebugHook() async {
+        let before = DebugMemory.physFootprintBytes()
+        await performSave()
+        let after = DebugMemory.physFootprintBytes()
+
+        let artifact: RenderedArtifact?
+        if let saveResult {
+            artifact = RenderedArtifact(image: saveResult.image, pixelSize: saveResult.pixelSize, jpegData: saveResult.jpegData, creationDate: saveResult.creationDate)
+        } else {
+            // Save-to-Photos failed (e.g. permission) - re-render+encode
+            // directly so the debug artifact still exists. `performSave`
+            // already tried once and lost the artifact behind the alert
+            // path in that case (SaveError isn't threaded back to this
+            // scope), so this is a deliberate second render purely for the
+            // debug hook's own file/log output, never on the real Save path.
+            let outcome = await state.saveCoordinator.renderAndEncode(document: state.document, images: state.images, canvasSize: state.canvasSize)
+            artifact = try? outcome.get()
+        }
+
+        guard let artifact else {
+            debugExportLogger.error("autoSave debug hook: render failed, nothing to write")
+            return
+        }
+
+        if let docsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            let debugURL = docsURL.appendingPathComponent("export-debug.jpg")
+            do {
+                try artifact.jpegData.write(to: debugURL, options: .atomic)
+            } catch {
+                debugExportLogger.error("autoSave debug hook: failed to write export-debug.jpg: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+
+        let beforeMB = Double(before) / 1_048_576.0
+        let afterMB = Double(after) / 1_048_576.0
+        debugExportLogger.log("""
+            autoSave debug: pixelSize=\(Int(artifact.pixelSize.width), privacy: .public)x\(Int(artifact.pixelSize.height), privacy: .public) \
+            jpegBytes=\(artifact.jpegData.count, privacy: .public) \
+            creationDate=\(String(describing: artifact.creationDate), privacy: .public) \
+            memBeforeMB=\(beforeMB, privacy: .public) memAfterMB=\(afterMB, privacy: .public) peakDeltaMB=\(afterMB - beforeMB, privacy: .public)
+            """)
+    }
+    #endif
 }
 
 // MARK: - Dark chrome palette (PRD-locked)
