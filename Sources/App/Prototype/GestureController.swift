@@ -10,10 +10,10 @@
 // math below expects.
 //
 // Scope notes (see final report for the full list):
-//  - Rotation/flip are intentionally ignored in the pinch anchor math below;
-//    no gesture in this phase mutates quarterTurns/flipH/flipV, so every
-//    live photo has quarterTurns == 0 and flips == false. The static render
-//    in CanvasView still honors those fields.
+//  - Phase 4: quarterTurns/flipH/flipV became user-reachable. No math
+//    change was needed here: `center` is defined in EFFECTIVE DISPLAYED
+//    space (see panDelta's note), so screen axes are always the crop's
+//    axes. Flip/Rotate remap `center` at action time in EditorState.
 //  - The swap "proxy thumbnail" is a live re-render of the same crop rather
 //    than a rasterized UIImage snapshot - pixel-identical, simpler.
 import SwiftUI
@@ -37,6 +37,15 @@ func fillScale(cellSize: CGSize, photoPixelSize: CGSize, quarterTurns: Int) -> D
 /// PAN's delta-center formula. Dragging right moves the photo CONTENT right
 /// on screen, which means the normalized `center` (the point of the photo
 /// that sits at the cell's center) must move LEFT - hence the negation.
+/// NOTE (Phase 4 coordinate-space decision): `center` lives in EFFECTIVE
+/// DISPLAYED space - the photo as currently rendered on screen, after
+/// rotation and flips, normalized 0...1 with screen-aligned axes. This is
+/// what `clampedCenter` has always implemented (it clamps against the
+/// effective, dimension-swapped extents). Screen axes therefore ARE the
+/// crop's axes for every quarterTurns/flip state, and pan/pinch math needs
+/// no per-orientation mapping. Flip/Rotate actions instead remap `center`
+/// once, at action time (EditorState.flipH/flipV/rotate), so the visible
+/// crop mirrors/rotates in place.
 func panDelta(translation: CGSize, s0: Double, zoom: Double, photoEffectiveSize: CGSize) -> CGPoint {
     let displayScale = s0 * zoom
     guard displayScale > 0, photoEffectiveSize.width > 0, photoEffectiveSize.height > 0 else { return .zero }

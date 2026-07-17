@@ -86,6 +86,18 @@ struct CanvasView: View {
                 .onChanged { controller?.magnifyChanged($0) }
                 .onEnded { controller?.magnifyEnded($0) }
         )
+        .simultaneousGesture(
+            // Phase 4: closes an open Layout/Ratio/Border tray on any tap
+            // (dead space OR a photo) when nothing is selected. Selecting a
+            // photo already closes the tray via EditorView's
+            // `.onChange(of: state.selection)`; this covers the dead-space
+            // case, where selection stays nil so that onChange never fires.
+            // Purely additive/side-effect-only - doesn't touch
+            // GestureController or the selection/pan/swap state machine.
+            TapGesture().onEnded {
+                if state.selection == nil { state.activeTray = .none }
+            }
+        )
     }
 
     // MARK: - Photo rendering
@@ -98,8 +110,18 @@ struct CanvasView: View {
         let s0 = fillScale(cellSize: cellSize, photoPixelSize: pixelSize, quarterTurns: ref.quarterTurns)
         let displayScale = s0 * ref.zoom
         let frameSize = CGSize(width: pixelSize.width * displayScale, height: pixelSize.height * displayScale)
-        let innerOffsetX = cellSize.width / 2 - ref.center.x * frameSize.width
-        let innerOffsetY = cellSize.height / 2 - ref.center.y * frameSize.height
+        // `center` is in effective DISPLAYED space (post-rotation/flip,
+        // screen-aligned - see panDelta's note in GestureController). The
+        // rotated visual is re-framed to its own bounding box (effW x effH)
+        // FIRST, so the offset formula below is the same one that has been
+        // rendering correct crops since Phase 2 - just against effective
+        // dimensions. At quarterTurns == 0 the re-frame is an exact no-op
+        // (effW == frameW), which is what keeps the proven path unchanged.
+        let effPx = effectivePhotoSize(pixelSize: pixelSize, quarterTurns: ref.quarterTurns)
+        let effW = effPx.width * displayScale
+        let effH = effPx.height * displayScale
+        let innerOffsetX = cellSize.width / 2 - ref.center.x * effW
+        let innerOffsetY = cellSize.height / 2 - ref.center.y * effH
 
         ZStack(alignment: .topLeading) {
             Image(uiImage: image)
@@ -107,6 +129,7 @@ struct CanvasView: View {
                 .frame(width: frameSize.width, height: frameSize.height)
                 .rotationEffect(.degrees(90 * Double(ref.quarterTurns)))
                 .scaleEffect(x: ref.flipH ? -1 : 1, y: ref.flipV ? -1 : 1)
+                .frame(width: effW, height: effH)
                 .offset(x: innerOffsetX, y: innerOffsetY)
         }
         .frame(width: cellSize.width, height: cellSize.height)

@@ -349,6 +349,68 @@ do {
 }
 
 // =====================================================================
+// Phase 4 - removeLeaf(_:from:) (EditOps.swift) - the "id not found -> nil"
+// wrapper over Operations.swift's removeLeaf(id:from:), plus invariant
+// checks on every non-nil result.
+// =====================================================================
+do {
+    let a = PhotoID()
+    let b = PhotoID()
+    let c = PhotoID()
+    let ghost = PhotoID() // never inserted into any tree below
+
+    // Remove middle child of a 3-way: fractions renormalize proportionally.
+    let threeWay = Node.split(axis: .horizontal, fractions: [0.2, 0.3, 0.5], children: [.leaf(a), .leaf(b), .leaf(c)])
+    if let reduced = removeLeaf(b, from: threeWay), case .split(_, let fr, let children) = reduced {
+        check(children.count == 2, "EditOps removeLeaf 3-way: two children remain")
+        check(children[0] == .leaf(a) && children[1] == .leaf(c), "EditOps removeLeaf 3-way: correct survivors")
+        check(near(fr[0], 0.2 / 0.7, 1e-9), "EditOps removeLeaf 3-way: renormalized f0")
+        check(near(fr[1], 0.5 / 0.7, 1e-9), "EditOps removeLeaf 3-way: renormalized f1")
+        check(isValidTree(reduced), "EditOps removeLeaf 3-way: result satisfies tree invariants")
+    } else {
+        check(false, "EditOps removeLeaf 3-way: expected a split result")
+    }
+
+    // Remove from a 2-way: returns the sibling subtree directly.
+    let twoWay = Node.split(axis: .horizontal, fractions: [0.4, 0.6], children: [.leaf(a), .leaf(b)])
+    let removedTwoWay = removeLeaf(a, from: twoWay)
+    check(removedTwoWay == .leaf(b), "EditOps removeLeaf 2-way: returns sibling leaf")
+    if let removedTwoWay { check(isValidTree(removedTwoWay), "EditOps removeLeaf 2-way: result satisfies invariants") }
+
+    // Remove a leaf nested 2 deep: single-child collapse cascades up.
+    let nested = Node.split(
+        axis: .horizontal, fractions: [0.5, 0.5],
+        children: [.leaf(a), .split(axis: .vertical, fractions: [0.5, 0.5], children: [.leaf(b), .leaf(c)])]
+    )
+    if let reducedNested = removeLeaf(b, from: nested) {
+        check(node(at: [0], in: reducedNested) == .leaf(a), "EditOps removeLeaf nested: leaf a untouched")
+        check(node(at: [1], in: reducedNested) == .leaf(c), "EditOps removeLeaf nested: inner split collapsed to leaf c")
+        check(isValidTree(reducedNested), "EditOps removeLeaf nested: result satisfies invariants")
+    } else {
+        check(false, "EditOps removeLeaf nested: expected non-nil result")
+    }
+
+    // Remove a nonexistent id -> nil (the behavior Operations.swift's own
+    // removeLeaf(id:from:) does NOT provide - it returns the tree unchanged).
+    check(removeLeaf(ghost, from: threeWay) == nil, "EditOps removeLeaf: nonexistent id -> nil")
+    check(removeLeaf(ghost, from: .leaf(a)) == nil, "EditOps removeLeaf: nonexistent id on a lone leaf -> nil")
+
+    // Sole-root-leaf removal still returns nil, matching the wrapped function.
+    check(removeLeaf(a, from: .leaf(a)) == nil, "EditOps removeLeaf: sole root leaf -> nil")
+
+    // Invariants hold on every non-nil result produced above (belt-and-braces
+    // re-check via the standalone helper, not just inline above).
+    check(isValidTree(threeWay), "EditOps removeLeaf: original 3-way tree itself is valid (sanity)")
+
+    // isValidTree actually catches violations too, not just a rubber stamp.
+    let belowFloor = Node.split(axis: .horizontal, fractions: [0.05, 0.95], children: [.leaf(a), .leaf(b)])
+    check(isValidTree(belowFloor) == false, "isValidTree: catches a fraction below the 0.10 floor")
+    let badSum = Node.split(axis: .horizontal, fractions: [0.3, 0.3], children: [.leaf(a), .leaf(b)])
+    check(isValidTree(badSum) == false, "isValidTree: catches fractions not summing to 1")
+    check(isValidTree(.leaf(a)) == true, "isValidTree: a lone leaf is trivially valid")
+}
+
+// =====================================================================
 // Codable round trip of a full Document
 // =====================================================================
 do {

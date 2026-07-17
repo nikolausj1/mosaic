@@ -10,11 +10,22 @@ import UIKit
 
 // MARK: - PickerState
 
+/// `.pick`: the normal 2-4 multi-select flow that builds a whole new
+/// Document. `.replace` (Phase 4): exactly one selection, used by the
+/// editor's photo toolbar "Replace" action to swap a single existing
+/// photo's asset - see `PickerState.confirmReplace()` and
+/// `EditorState.replace(photoID:image:pixelSize:assetLocalIdentifier:)`.
+enum PickerMode {
+    case pick
+    case replace
+}
+
 @Observable
 @MainActor
 final class PickerState {
 
     let library = PhotoLibraryService()
+    let mode: PickerMode
 
     private(set) var albums: [PhotoLibraryService.AlbumInfo] = []
     private(set) var selectedAlbum: PhotoLibraryService.AlbumInfo?
@@ -34,10 +45,20 @@ final class PickerState {
 
     var authorizationStatus: PHAuthorizationStatus { library.authorizationStatus }
     var isLimited: Bool { authorizationStatus == .limited }
-    var canConfirm: Bool { selectedAssetIDs.count >= 2 || fallbackPicks.count >= 2 }
+    var canConfirm: Bool {
+        switch mode {
+        case .pick: return selectedAssetIDs.count >= 2 || fallbackPicks.count >= 2
+        case .replace: return selectedAssetIDs.count == 1 || fallbackPicks.count == 1
+        }
+    }
     var selectionCount: Int { max(selectedAssetIDs.count, fallbackPicks.count) }
 
-    static let maxSelection = 4
+    static let maxSelectionForPick = 4
+    var effectiveSelectionLimit: Int { mode == .replace ? 1 : Self.maxSelectionForPick }
+
+    init(mode: PickerMode = .pick) {
+        self.mode = mode
+    }
 
     // MARK: - Lifecycle
 
@@ -75,7 +96,13 @@ final class PickerState {
             selectedAssetIDs.remove(at: idx)
             return
         }
-        guard selectedAssetIDs.count < Self.maxSelection else {
+        if mode == .replace {
+            // Single-select: tapping a different photo swaps the pick
+            // rather than being blocked once one is already selected.
+            selectedAssetIDs = [assetID]
+            return
+        }
+        guard selectedAssetIDs.count < Self.maxSelectionForPick else {
             rejectSelection()
             return
         }
@@ -141,6 +168,29 @@ final class PickerState {
         let n = min(count, assets.count)
         selectedAssetIDs = (0..<n).map { assets.object(at: $0).localIdentifier }
         return await confirmSelection()
+    }
+
+    /// Phase 4 Replace flow: exactly one loaded (image, pixelSize, asset) -
+    /// no Document is built here (that pipeline requires 2-4 photos for
+    /// `templates(for:)`); the caller (EditorState.replace) auto-frames
+    /// against the SPECIFIC cell the replaced photo already occupies.
+    func confirmReplace() async -> (image: UIImage, pixelSize: CGSize, asset: PHAsset?)? {
+        isLoading = true
+        loadingMessage = "Preparing…"
+        defer { isLoading = false }
+
+        if let pick = fallbackPicks.first {
+            return (pick.image, pick.pixelSize, nil)
+        }
+
+        guard let assetID = selectedAssetIDs.first else { return nil }
+        for i in 0..<assets.count {
+            let asset = assets.object(at: i)
+            guard asset.localIdentifier == assetID else { continue }
+            guard let (proxy, pixelSize) = await library.loadForEditing(asset: asset) else { return nil }
+            return (proxy, pixelSize, asset)
+        }
+        return nil
     }
 
     private func buildDocument(from loaded: [(image: UIImage, pixelSize: CGSize, asset: PHAsset?)]) async -> (Document, [PhotoID: UIImage])? {
@@ -213,7 +263,11 @@ final class PickerState {
 
 struct PickerView: View {
     @State var state: PickerState
-    var onConfirmed: (Document, [PhotoID: UIImage]) -> Void
+    /// `.pick` mode's completion: a whole new Document + its images.
+    var onConfirmed: (Document, [PhotoID: UIImage]) -> Void = { _, _ in }
+    /// `.replace` mode's completion (Phase 4): the single freshly-loaded
+    /// asset, handed to `EditorState.replace(photoID:image:pixelSize:...)`.
+    var onReplaceConfirmed: ((UIImage, CGSize, PHAsset?) -> Void)? = nil
 
     @State private var showAlbumMenu = false
     @State private var showFallbackPicker = false
@@ -229,18 +283,27 @@ struct PickerView: View {
         .foregroundStyle(.white)
         .task { await state.onAppear() }
         .sheet(isPresented: $showFallbackPicker) {
-            SystemPhotoPicker { picks in
+            SystemPhotoPicker(selectionLimit: state.effectiveSelectionLimit) { picks in
                 for pick in picks { state.addFallbackPick(image: pick.0, pixelSize: pick.1) }
-                Task {
-                    if let (doc, images) = await state.confirmSelection() {
-                        onConfirmed(doc, images)
-                    }
-                }
+                Task { await confirmAndDeliver() }
             }
         }
         .overlay {
             if state.isLoading {
                 loadingOverlay
+            }
+        }
+    }
+
+    private func confirmAndDeliver() async {
+        switch state.mode {
+        case .pick:
+            if let (doc, images) = await state.confirmSelection() {
+                onConfirmed(doc, images)
+            }
+        case .replace:
+            if let (image, pixelSize, asset) = await state.confirmReplace() {
+                onReplaceConfirmed?(image, pixelSize, asset)
             }
         }
     }
@@ -270,13 +333,9 @@ struct PickerView: View {
             Spacer()
 
             Button {
-                Task {
-                    if let (doc, images) = await state.confirmSelection() {
-                        onConfirmed(doc, images)
-                    }
-                }
+                Task { await confirmAndDeliver() }
             } label: {
-                Text("Next (\(state.selectionCount))")
+                Text(state.mode == .replace ? "Replace" : "Next (\(state.selectionCount))")
                     .font(.headline)
             }
             .disabled(!state.canConfirm)
@@ -468,12 +527,13 @@ private struct GridThumbnail: View {
 // MARK: - PHPickerViewController fallback (denied-state "Choose Photos")
 
 private struct SystemPhotoPicker: UIViewControllerRepresentable {
+    var selectionLimit: Int = PickerState.maxSelectionForPick
     var onComplete: ([(UIImage, CGSize)]) -> Void
 
     func makeUIViewController(context: Context) -> PHPickerViewController {
         var config = PHPickerConfiguration()
         config.filter = .images
-        config.selectionLimit = PickerState.maxSelection
+        config.selectionLimit = selectionLimit
         config.preferredAssetRepresentationMode = .current
         let picker = PHPickerViewController(configuration: config)
         picker.delegate = context.coordinator
