@@ -23,7 +23,8 @@ targets:
       path: Sources/Info.plist
       properties:
         CFBundleDisplayName: Mosaic
-        UILaunchScreen: {}
+        UILaunchScreen:
+          UIColorName: LaunchBackground
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         ITSAppUsesNonExemptEncryption: false

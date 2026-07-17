@@ -73,7 +73,13 @@ struct ContentView: View {
     /// here, so the deleteLast()-then-edit contract is exactly one code path.
     private func commitNewCollage(document: Document, images: [PhotoID: UIImage]) {
         DocumentStore.deleteLast()
-        editorState = EditorState(document: document, images: images, photoStore: PhotoStore(), layoutIndex: 0)
+        let state = EditorState(document: document, images: images, photoStore: PhotoStore(), layoutIndex: 0)
+        // Fresh-pick arrivals open with the Layout tray up (Justin,
+        // 2026-07-17): choosing the topology is the natural first move
+        // after choosing photos. Restore/edit-last arrive quiet - this is
+        // only for the pick flow.
+        state.activeTray = .layout
+        editorState = state
     }
 
     /// "Edit last collage" (PRD): last.json -> current.json, restored into

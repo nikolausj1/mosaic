@@ -284,6 +284,9 @@ struct PickerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if state.mode == .pick {
+                masthead
+            }
             header
             // Shown regardless of photo-library authorization state (unlike
             // the grid/denied/loading `content` below): resuming a
@@ -323,6 +326,27 @@ struct PickerView: View {
                 onReplaceConfirmed?(image, pixelSize, asset)
             }
         }
+    }
+
+    // MARK: Masthead (branding + instruction, Justin 2026-07-17)
+
+    /// Reserved brand space on Screen A's fresh/new state: the wordmark and
+    /// a single instruction line. Deliberately quiet - copy, not a tutorial
+    /// (the PRD's no-tutorials rule stands; the gesture grammar still
+    /// teaches itself in the editor).
+    private var masthead: some View {
+        VStack(spacing: 6) {
+            Text("MOSAIC")
+                .font(.system(size: 22, weight: .bold))
+                .tracking(6)
+                .foregroundStyle(Color.mosaicAccent)
+            Text("Choose 2-4 photos below")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.55))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 18)
+        .padding(.bottom, 14)
     }
 
     // MARK: Header

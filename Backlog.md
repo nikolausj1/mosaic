@@ -123,6 +123,14 @@ These could be settled by dumping strings/resources from an Android APK, **which
 **Why not:** re-running on topology or ratio changes makes photos move by themselves, and re-running during a divider drag makes them swim under your finger. The one-shot version slots into the existing `center` field with zero new rules.
 **Revisit signal:** photos that hold multiple subjects are consistently badly framed after a topology change.
 
+### B27 - Onboarding screens (OPEN QUESTION - PRD conflict, needs Justin's explicit call)
+**Justin asked (2026-07-17)** for splash + onboarding screens for first launch. The launch screen (dark, native) shipped. Onboarding screens directly contradict the PRD's locked no-tutorials principle ("the handle grammar has to teach itself or the app has failed") and its designed alternative (first-ever-launch auto-selection as the entire onboarding). Options on the table: (a) keep the PRD's position - no onboarding; (b) a single dismissible one-time hint line, not a carousel; (c) full onboarding screens, formally revising the PRD principle. Claude recommends (a), accepts (b); (c) needs the PRD principle rewritten, not just screens added.
+**Revisit signal:** anyone Justin hands the app to fails to discover pan/resize/swap within the first minute.
+
+### B28 - Settings area (decided: none in v1; ingress reserved)
+v1 has nothing to configure by design (dark always, no resolution picker, zero-config auto-framing). Candidates that would eventually justify one: watermark toggle (v2 StoreKit), restore purchases (v2), haptics toggle, about/licenses. When one materializes, the ingress is a gear icon in the PICKER header (Screen A) - the editor's chrome budget is spent.
+**Revisit signal:** the first real setting arrives (likely v2's purchase restore).
+
 ### B24 - "Original" ratio chip semantics (Phase 4 judgment call)
 **Shipped:** Original := the FIRST photo's native pixel aspect (document leaf order). The PRD lists the chip without defining it for a multi-photo canvas.
 **Revisit signal:** Justin taps Original expecting something else (e.g. the arrival ratio, or the currently selected photo's aspect).
