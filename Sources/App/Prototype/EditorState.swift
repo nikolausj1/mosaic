@@ -145,13 +145,54 @@ final class EditorState {
 
     // MARK: - Cycle
 
+    /// Cycles `templates(for:)` for the CURRENT photo count, using the
+    /// CURRENT document's own leaf order (not re-run through
+    /// contentFitAssignment/autoFrame - per the PRD's topology-change rule,
+    /// photos keep their existing zoom/center on a plain layout cycle; only
+    /// reclampAll runs). One undo snapshot per cycle.
     func cycleLayout() {
-        let nextIndex = (layoutIndex + 1) % PhotoStore.layoutCount
-        var doc = photoStore.document(forLayout: nextIndex)
+        let currentIDs = photoIDs(in: document.root)
+        let candidates = templates(for: currentIDs)
+        guard !candidates.isEmpty else { return }
+        let nextIndex = (layoutIndex + 1) % candidates.count
+
+        var doc = document
+        doc.root = candidates[nextIndex]
         doc = reclampAll(doc, canvasSize: canvasSize)
+
         let old = document
         layoutIndex = nextIndex
-        selection = nil
+        document = doc
+        pushUndo(old)
+    }
+
+    // MARK: - Auto-frame toggle
+
+    /// Toggles the selected photo between its cached auto-frame ROI and a
+    /// plain center/fill crop. One undo snapshot per toggle.
+    func toggleAuto() {
+        guard let sel = selection, let photo = document.photos[sel] else { return }
+
+        var updated = photo
+        if photo.isAuto {
+            updated.center = CGPoint(x: 0.5, y: 0.5)
+            updated.zoom = 1.0
+            updated.isAuto = false
+        } else if let roi = photo.roi {
+            updated.center = roi.center
+            updated.zoom = roi.zoom
+            updated.isAuto = true
+        } else {
+            updated.center = CGPoint(x: 0.5, y: 0.5)
+            updated.zoom = 1.0
+            updated.isAuto = false
+        }
+
+        var doc = document
+        doc.photos[sel] = updated
+        doc = reclampAll(doc, canvasSize: canvasSize)
+
+        let old = document
         document = doc
         pushUndo(old)
     }

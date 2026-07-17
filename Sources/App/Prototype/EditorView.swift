@@ -1,24 +1,17 @@
 // Sources/App/Prototype/EditorView.swift
-// Full-screen dark chrome: a top bar (Cycle / Undo / Redo) and the canvas
-// centered in the remaining space. No Save, no other chrome - out of scope
-// for this gesture-prototype phase.
+// Full-screen dark chrome: a top bar (New / Cycle / Auto / Undo / Redo) and
+// the canvas centered in the remaining space. `state` is built by the caller
+// (PickerView's confirm flow, or ContentView's -protoLayout/-autoPick launch-
+// arg fallbacks) - this view owns no document-construction logic itself.
 import SwiftUI
 
 struct EditorView: View {
-    @State private var state: EditorState
+    @State var state: EditorState
+    var onNew: (() -> Void)?
+
     @AppStorage("hasSeenEditor") private var hasSeenEditor: Bool = false
     @State private var hasAppliedFirstLaunchSelection = false
-
-    init() {
-        let store = PhotoStore()
-        let layoutIndex = EditorView.launchLayoutIndex()
-        var doc = store.document(forLayout: layoutIndex)
-        // All 4 prototype documents start at canvasRatio 1:1, so a square
-        // neutral canvas here is the *exact* real fit, not an approximation -
-        // reclamp is scale-invariant for a fixed aspect ratio anyway.
-        doc = reclampAll(doc, canvasSize: CGSize(width: 1000, height: 1000))
-        _state = State(initialValue: EditorState(document: doc, images: store.imagesByID, photoStore: store, layoutIndex: layoutIndex))
-    }
+    @State private var showDiscardConfirm = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -48,10 +41,26 @@ struct EditorView: View {
 
     private var topBar: some View {
         HStack {
+            Button("New") { showDiscardConfirm = true }
+                .frame(minWidth: 44, minHeight: 44)
+                .confirmationDialog("Discard current collage?", isPresented: $showDiscardConfirm, titleVisibility: .visible) {
+                    Button("Discard", role: .destructive) { onNew?() }
+                    Button("Cancel", role: .cancel) {}
+                }
+
+            Spacer()
+
             Button("Cycle") { state.cycleLayout() }
                 .frame(minWidth: 44, minHeight: 44)
 
-            Spacer()
+            Button {
+                state.toggleAuto()
+            } label: {
+                Image(systemName: "wand.and.stars")
+                    .frame(width: 44, height: 44)
+            }
+            .disabled(state.selection == nil)
+            .foregroundStyle(autoButtonColor)
 
             Button {
                 state.undo()
@@ -75,6 +84,16 @@ struct EditorView: View {
         .background(Color.white.opacity(0.06)) // grey-box chrome placeholder - not in scope this phase
     }
 
+    /// Full accent when the selected photo's crop is the cached auto-frame
+    /// ROI; a muted accent otherwise (including when nothing is selected,
+    /// where the button is also disabled).
+    private var autoButtonColor: Color {
+        guard let sel = state.selection, let photo = state.document.photos[sel], photo.isAuto else {
+            return Color.mosaicAccent.opacity(0.4)
+        }
+        return Color.mosaicAccent
+    }
+
     private func applyFirstLaunchSelectionIfNeeded() {
         guard !hasAppliedFirstLaunchSelection else { return }
         hasAppliedFirstLaunchSelection = true
@@ -83,15 +102,5 @@ struct EditorView: View {
         let (cells, _) = solve(root: state.document.root, canvasSize: state.canvasSize, border: state.document.border)
         state.selection = cells.first?.id
         hasSeenEditor = true
-    }
-
-    /// "-protoLayout N" (0...3) picks the initial document, per the Build
-    /// Guide's launch-arg convention for simctl screenshot automation.
-    private static func launchLayoutIndex() -> Int {
-        let args = ProcessInfo.processInfo.arguments
-        guard let flagIndex = args.firstIndex(of: "-protoLayout"),
-              flagIndex + 1 < args.count,
-              let value = Int(args[flagIndex + 1]) else { return 0 }
-        return value
     }
 }

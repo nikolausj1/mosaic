@@ -26,3 +26,5 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         ITSAppUsesNonExemptEncryption: false
+        NSPhotoLibraryUsageDescription: Mosaic shows your photo library so you can pick photos for your collage. Nothing leaves your device.
+        NSPhotoLibraryAddUsageDescription: Mosaic saves your finished collage to your photo library.

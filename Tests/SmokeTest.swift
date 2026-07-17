@@ -389,6 +389,223 @@ do {
 }
 
 // =====================================================================
+// Phase 3 - Templates: counts and leaf orders
+// =====================================================================
+func leafList(_ node: Node) -> [PhotoID] {
+    switch node {
+    case .leaf(let id): return [id]
+    case .split(_, _, let children): return children.flatMap { leafList($0) }
+    }
+}
+
+do {
+    let ids2 = (0..<2).map { _ in PhotoID() }
+    let ids3 = (0..<3).map { _ in PhotoID() }
+    let ids4 = (0..<4).map { _ in PhotoID() }
+
+    let t2 = templates(for: ids2)
+    check(t2.count == 2, "templates: 2-photo count == 2")
+    check(leafList(t2[0]) == ids2, "templates: 2-photo[0] (side-by-side) leaf order")
+    check(leafList(t2[1]) == ids2, "templates: 2-photo[1] (stacked) leaf order")
+    if case .split(let axis0, let f0, _) = t2[0] {
+        check(axis0 == .horizontal, "templates: 2-photo[0] axis horizontal")
+        check(f0 == [0.5, 0.5], "templates: 2-photo[0] fractions 50/50")
+    } else { check(false, "templates: 2-photo[0] is a split") }
+    if case .split(let axis1, _, _) = t2[1] {
+        check(axis1 == .vertical, "templates: 2-photo[1] axis vertical")
+    } else { check(false, "templates: 2-photo[1] is a split") }
+
+    let t3 = templates(for: ids3)
+    check(t3.count == 6, "templates: 3-photo count == 6")
+    for (i, t) in t3.enumerated() {
+        check(leafList(t) == ids3, "templates: 3-photo[\(i)] leaf order preserved")
+    }
+    if case .split(let axis, let f, let children) = t3[2] {
+        check(axis == .horizontal, "templates: 3-photo[2] big-left axis horizontal")
+        check(f == [0.6, 0.4], "templates: 3-photo[2] big-left fractions")
+        check(children[0] == .leaf(ids3[0]), "templates: 3-photo[2] big-left slot0 is leaf")
+        if case .split(let innerAxis, let innerF, _) = children[1] {
+            check(innerAxis == .vertical, "templates: 3-photo[2] right column vertical")
+            check(innerF == [0.5, 0.5], "templates: 3-photo[2] right column 50/50")
+        } else { check(false, "templates: 3-photo[2] right side is a split") }
+    } else { check(false, "templates: 3-photo[2] is a split") }
+    // Mirror check: index 3 swaps the big cell to the right.
+    if case .split(_, let f3, let children3) = t3[3] {
+        check(f3 == [0.4, 0.6], "templates: 3-photo[3] mirror fractions")
+        check(children3[1] == .leaf(ids3[2]), "templates: 3-photo[3] big cell on the right")
+    } else { check(false, "templates: 3-photo[3] is a split") }
+
+    let t4 = templates(for: ids4)
+    check(t4.count == 8, "templates: 4-photo count == 8")
+    for (i, t) in t4.enumerated() {
+        check(leafList(t) == ids4, "templates: 4-photo[\(i)] leaf order preserved")
+    }
+    if case .split(let axis, let f, let children) = t4[0] {
+        check(axis == .horizontal, "templates: 4-photo[0] 2x2 outer axis horizontal")
+        check(f == [0.5, 0.5], "templates: 4-photo[0] 2x2 outer fractions")
+        check(children.count == 2, "templates: 4-photo[0] 2x2 has 2 columns")
+    } else { check(false, "templates: 4-photo[0] is a split") }
+    if case .split(let axis, let f, let children) = t4[7] {
+        check(axis == .horizontal, "templates: 4-photo[7] sandwich axis horizontal")
+        check(f == [0.3, 0.4, 0.3], "templates: 4-photo[7] sandwich fractions")
+        check(children[0] == .leaf(ids4[0]), "templates: 4-photo[7] sandwich left leaf")
+        check(children[2] == .leaf(ids4[3]), "templates: 4-photo[7] sandwich right leaf")
+        if case .split(_, let innerF, _) = children[1] {
+            check(innerF == [0.5, 0.5], "templates: 4-photo[7] sandwich middle 50/50")
+        } else { check(false, "templates: 4-photo[7] sandwich middle is a split") }
+    } else { check(false, "templates: 4-photo[7] is a split") }
+}
+
+// =====================================================================
+// Phase 3 - defaultTemplateIndex: orientation-aware default
+// =====================================================================
+do {
+    check(defaultTemplateIndex(orientations: [
+        CGSize(width: 1, height: 1), CGSize(width: 2, height: 3),
+        CGSize(width: 3, height: 4), CGSize(width: 1, height: 2)
+    ]) == 0, "defaultTemplateIndex: 4 photos always -> 2x2 (index 0)")
+
+    check(defaultTemplateIndex(orientations: [
+        CGSize(width: 3, height: 4), CGSize(width: 2, height: 3)
+    ]) == 0, "defaultTemplateIndex: 2 portrait -> columns (0)")
+
+    check(defaultTemplateIndex(orientations: [
+        CGSize(width: 4, height: 3), CGSize(width: 16, height: 9)
+    ]) == 1, "defaultTemplateIndex: 2 landscape -> rows (1)")
+
+    check(defaultTemplateIndex(orientations: [
+        CGSize(width: 3, height: 4), CGSize(width: 4, height: 3)
+    ]) == 0, "defaultTemplateIndex: 2-way tie -> columns (0)")
+
+    check(defaultTemplateIndex(orientations: [
+        CGSize(width: 3, height: 4), CGSize(width: 1, height: 1), CGSize(width: 16, height: 9)
+    ]) == 0, "defaultTemplateIndex: 3 majority portrait/square -> columns (0)")
+
+    check(defaultTemplateIndex(orientations: [
+        CGSize(width: 16, height: 9), CGSize(width: 4, height: 3), CGSize(width: 3, height: 4)
+    ]) == 1, "defaultTemplateIndex: 3 majority landscape -> rows (1)")
+}
+
+// =====================================================================
+// Phase 3 - contentFitAssignment: brute-force cost minimization
+// =====================================================================
+do {
+    let portrait = PhotoID()
+    let landscape = PhotoID()
+    let fourFive = PhotoID()
+    // Deliberately NOT already optimal: the template's original order puts
+    // fourFive at big-left, landscape at top-right, portrait at bottom-right.
+    let ids = [fourFive, landscape, portrait]
+    let template = templates(for: ids)[2] // big-left+2-stacked-right
+    let canvasSize = CGSize(width: 1000, height: 1000)
+    let sizes: [PhotoID: CGSize] = [
+        portrait: CGSize(width: 900, height: 1600),   // aspect 0.5625 (9:16)
+        landscape: CGSize(width: 1600, height: 900),  // aspect 1.778 (16:9)
+        fourFive: CGSize(width: 800, height: 1000)     // aspect 0.8 (4:5) - exact match for the right-column cells
+    ]
+
+    let result = contentFitAssignment(photoSizes: sizes, template: template, canvasSize: canvasSize, border: .none)
+    let resultLeaves = leafList(result)
+    check(resultLeaves[0] == portrait, "contentFitAssignment: 9:16 portrait lands in the tall big-left slot")
+    check(Set(resultLeaves[1...2]) == Set([landscape, fourFive]), "contentFitAssignment: remaining photos fill the equal-aspect right slots")
+
+    // Manual cost check (cost = sum |log(photoAspect) - log(cellAspect)|) for
+    // a handful of permutations, derived from the template's own solved rects
+    // rather than hardcoded numbers.
+    let (cellsForCost, _) = solve(root: template, canvasSize: canvasSize, border: .none)
+    let cellAspectByID = Dictionary(uniqueKeysWithValues: cellsForCost.map { ($0.id, Double($0.rect.width) / Double($0.rect.height)) })
+    func manualCost(_ order: [PhotoID]) -> Double {
+        zip(order, ids).reduce(0) { acc, pair in
+            let (photoID, slotOriginalID) = pair
+            let photoAspect = Double(sizes[photoID]!.width) / Double(sizes[photoID]!.height)
+            let cellAspect = cellAspectByID[slotOriginalID]!
+            return acc + abs(log(photoAspect) - log(cellAspect))
+        }
+    }
+    let identityCost = manualCost([fourFive, landscape, portrait])
+    let winningCost = manualCost([portrait, fourFive, landscape])
+    let worstCost = manualCost([landscape, fourFive, portrait])
+    check(winningCost < identityCost, "contentFitAssignment: winning permutation beats identity")
+    check(winningCost < worstCost, "contentFitAssignment: winning permutation beats landscape-at-big-left")
+    check(near(winningCost, abs(log(0.5625) - log(0.6)) + abs(log(1600.0 / 900.0) - log(0.8)), 1e-3), "contentFitAssignment: winning cost matches hand-computed value")
+}
+
+// =====================================================================
+// Phase 3 - autoFrame: PRD-locked auto-framing anchors
+// =====================================================================
+do {
+    // Anchor A: no faces, no saliency -> nil.
+    let inputA = AutoFrameInput(
+        faces: [], faceConfidences: [],
+        salientRegion: nil,
+        photoPixelSize: CGSize(width: 2400, height: 1600),
+        cellSize: CGSize(width: 200, height: 200)
+    )
+    check(autoFrame(inputA) == nil, "autoFrame A: no faces/no saliency -> nil")
+}
+
+do {
+    // Anchor B: saliency-only zoom. Low-res source (2400x1600) caps zoom at 1.0.
+    let box = CGRect(x: 0.3, y: 0.2, width: 0.4, height: 0.6)
+    let inputB1 = AutoFrameInput(
+        faces: [], faceConfidences: [],
+        salientRegion: box,
+        photoPixelSize: CGSize(width: 2400, height: 1600),
+        cellSize: CGSize(width: 200, height: 200)
+    )
+    let roiB1 = autoFrame(inputB1)
+    check(roiB1 != nil, "autoFrame B1: saliency present -> non-nil")
+    if let roi = roiB1 {
+        check(near(roi.zoom, 1.0, 1e-9), "autoFrame B1: 2400x1600 source caps zoom at 1.0")
+    }
+
+    // Same saliency box at 2x resolution (4800x3200) -> reaches the 1.25 target.
+    let inputB2 = AutoFrameInput(
+        faces: [], faceConfidences: [],
+        salientRegion: box,
+        photoPixelSize: CGSize(width: 4800, height: 3200),
+        cellSize: CGSize(width: 200, height: 200)
+    )
+    let roiB2 = autoFrame(inputB2)
+    check(roiB2 != nil, "autoFrame B2: saliency present -> non-nil")
+    if let roi = roiB2 {
+        check(near(roi.zoom, 1.25, 1e-9), "autoFrame B2: 4800x3200 source reaches zoom 1.25")
+    }
+}
+
+do {
+    // Anchor C: a surviving face, no saliency -> zoom stays 1.0; headroom-
+    // biased center gets clamp-forced on the y axis for this tall-photo geometry.
+    let inputC = AutoFrameInput(
+        faces: [CGRect(x: 0.4, y: 0.2, width: 0.1, height: 0.15)],
+        faceConfidences: [0.9],
+        salientRegion: nil,
+        photoPixelSize: CGSize(width: 4800, height: 3200),
+        cellSize: CGSize(width: 200, height: 200)
+    )
+    let roiC = autoFrame(inputC)
+    check(roiC != nil, "autoFrame C: surviving face -> non-nil")
+    if let roi = roiC {
+        check(near(roi.zoom, 1.0, 1e-9), "autoFrame C: zoom 1.0 (no saliency)")
+        check(near(roi.center.x, 0.45, 1e-9), "autoFrame C: center.x == 0.45")
+        check(near(roi.center.y, 0.5, 1e-9), "autoFrame C: center.y clamp-forced to 0.5")
+    }
+}
+
+do {
+    // Anchor D: tiny face (pixel height below the 0.08 * short-edge floor) is
+    // discarded; with no saliency either, autoFrame falls through to nil.
+    let inputD = AutoFrameInput(
+        faces: [CGRect(x: 0.4, y: 0.2, width: 0.1, height: 0.05)],
+        faceConfidences: [0.9],
+        salientRegion: nil,
+        photoPixelSize: CGSize(width: 2400, height: 1600),
+        cellSize: CGSize(width: 200, height: 200)
+    )
+    check(autoFrame(inputD) == nil, "autoFrame D: tiny face discarded -> nil")
+}
+
+// =====================================================================
 // Summary
 // =====================================================================
 print("\(passed) passed, \(failed) failed")
