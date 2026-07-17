@@ -105,7 +105,13 @@ struct EditorView: View {
             EditorBottomBar(state: state, onReplace: { _ in })
         }
         .background(Color.mosaicBackground.ignoresSafeArea())
-        .overlay(alignment: .bottom) { debugHUD }
+        #if DEBUG
+        .overlay(alignment: .bottom) {
+            if ProcessInfo.processInfo.arguments.contains("-hud") {
+                debugHUD
+            }
+        }
+        #endif
         .sheet(isPresented: Binding(
             get: { replaceTarget != nil },
             set: { if !$0 { replaceTarget = nil } }
@@ -220,62 +226,77 @@ struct EditorView: View {
         .offset(y: -170) // clear the bottom bar + floating photo strip
     }
 
+    /// Header redesign, 2026-07-17: transparent bar (mosaicBackground shows
+    /// through - no fill of its own) with a hairline bottom divider, replacing
+    /// the old opaque mosaicSurface bar.
     private var topBar: some View {
-        HStack(spacing: 4) {
-            Button {
-                showDiscardConfirm = true
-            } label: {
-                barLabel("New")
-            }
-            .confirmationDialog("Discard current collage?", isPresented: $showDiscardConfirm, titleVisibility: .visible) {
-                Button("Discard", role: .destructive) { onNew?() }
-                Button("Cancel", role: .cancel) {}
-            }
-
-            Spacer()
-
-            Button {
-                state.undo()
-            } label: {
-                Image(systemName: "arrow.uturn.backward")
-                    .frame(width: 44, height: 44)
-            }
-            .disabled(state.undoStack.isEmpty)
-
-            Button {
-                state.redo()
-            } label: {
-                Image(systemName: "arrow.uturn.forward")
-                    .frame(width: 44, height: 44)
-            }
-            .disabled(state.redoStack.isEmpty)
-
-            Button {
-                Task { await performSave() }
-            } label: {
-                Group {
-                    if state.isExporting {
-                        ProgressView()
-                            .tint(.black)
-                            .frame(minWidth: 44, minHeight: 44)
-                    } else {
-                        barLabel("Save")
-                    }
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                Button {
+                    showDiscardConfirm = true
+                } label: {
+                    capsText("New")
+                        .foregroundStyle(Color.white.opacity(0.55))
+                        .frame(minWidth: 44, minHeight: 44, alignment: .leading)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(saveEnabled ? Color.mosaicAccent : Color.mosaicAccent.opacity(0.25))
-                )
-                .foregroundStyle(saveEnabled ? Color.black : Color.white.opacity(0.4))
+                .confirmationDialog("Discard current collage?", isPresented: $showDiscardConfirm, titleVisibility: .visible) {
+                    Button("Discard", role: .destructive) { onNew?() }
+                    Button("Cancel", role: .cancel) {}
+                }
+
+                Spacer()
+
+                HStack(spacing: 0) {
+                    Button {
+                        state.undo()
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(Color.white.opacity(state.undoStack.isEmpty ? 0.22 : 0.55))
+                            .frame(width: 44, height: 44)
+                    }
+                    .disabled(state.undoStack.isEmpty)
+                    .padding(.trailing, 4)
+
+                    Button {
+                        state.redo()
+                    } label: {
+                        Image(systemName: "arrow.uturn.forward")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(Color.white.opacity(state.redoStack.isEmpty ? 0.22 : 0.55))
+                            .frame(width: 44, height: 44)
+                    }
+                    .disabled(state.redoStack.isEmpty)
+                    .padding(.trailing, 12)
+
+                    Button {
+                        Task { await performSave() }
+                    } label: {
+                        Group {
+                            if state.isExporting {
+                                ProgressView()
+                                    .tint(.black)
+                            } else {
+                                capsText("Save")
+                                    .foregroundStyle(saveEnabled ? Color.black : Color.white.opacity(0.35))
+                            }
+                        }
+                        .frame(height: 34)
+                        .padding(.horizontal, 16)
+                        .background(
+                            Capsule().fill(saveEnabled ? Color.mosaicAccent : Color.mosaicAccent.opacity(0.25))
+                        )
+                    }
+                    .disabled(!saveEnabled || state.isExporting)
+                }
             }
-            .disabled(!saveEnabled || state.isExporting)
+            .padding(.horizontal, 16)
+            .frame(height: 52)
+
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(height: 0.5)
         }
-        .padding(.horizontal, 8)
-        .foregroundStyle(Color.mosaicAccent)
-        .frame(height: 52)
-        .background(Color.mosaicSurface)
     }
 
     /// PRD: Save is blocked while any photo is unavailable (deleted from the
@@ -285,10 +306,14 @@ struct EditorView: View {
         onSave != nil && state.unavailablePhotoIDs.isEmpty
     }
 
-    private func barLabel(_ text: String) -> some View {
+    /// The app's caps-tracked label token: `.system(size: 11, weight:
+    /// .semibold)` + `.textCase(.uppercase)` + `.tracking(0.8)`, used
+    /// throughout the bottom bar/trays and now the header too.
+    private func capsText(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 13, weight: .semibold))
-            .frame(minWidth: 44, minHeight: 44)
+            .font(.system(size: 11, weight: .semibold))
+            .textCase(.uppercase)
+            .tracking(0.8)
     }
 
     private func applyFirstLaunchSelectionIfNeeded() {

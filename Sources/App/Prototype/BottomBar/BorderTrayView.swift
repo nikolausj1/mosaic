@@ -1,7 +1,10 @@
 // Sources/App/Prototype/BottomBar/BorderTrayView.swift
-// Border tray (Phase 4): Inner/Outer sliders (0-100 UI <-> 0...0.15 fraction,
-// linked by default) + Radius slider + a swatch row (derived suggestions,
-// then white/black/greys, then presets, then a "+" system color picker).
+// Border tray (design revision, 2026-07-17): a single THICKNESS slider
+// (writes both border.inner and border.outer together - the old linked
+// Inner/Outer pair + link toggle is gone, `border.linked` stays true always)
+// + a Radius slider + a fixed six-swatch row: White, Black, three colors
+// sampled from the photos (EditorState.derivedSwatches), then a "+" that
+// opens the system color picker and applies the pick directly.
 import SwiftUI
 
 private let borderFractionCeiling = 0.15
@@ -21,7 +24,7 @@ struct BorderTrayView: View {
         .sheet(isPresented: $showColorPicker) {
             SystemColorPickerRepresentable(
                 initialColor: uiColor(from: state.document.border.color),
-                onPicked: { state.addCustomSwatch($0) },
+                onPicked: { state.setBorderColor($0) },
                 onDismiss: { showColorPicker = false }
             )
         }
@@ -31,11 +34,7 @@ struct BorderTrayView: View {
 
     private var sliders: some View {
         VStack(spacing: 6) {
-            HStack {
-                sliderRow(title: "Inner", value: innerBinding)
-                linkToggle
-            }
-            sliderRow(title: "Outer", value: outerBinding)
+            sliderRow(title: "Thickness", value: thicknessBinding)
             sliderRow(title: "Radius", value: radiusBinding)
         }
         .padding(.horizontal, 16)
@@ -48,7 +47,7 @@ struct BorderTrayView: View {
                 .textCase(.uppercase)
                 .tracking(0.8)
                 .foregroundStyle(.white.opacity(0.7))
-                .frame(width: 56, alignment: .leading)
+                .frame(width: 72, alignment: .leading)
             Slider(value: value, in: 0...100, onEditingChanged: { editing in
                 if editing { state.beginGesture() } else { state.commitGesture() }
             })
@@ -57,32 +56,10 @@ struct BorderTrayView: View {
         .frame(minHeight: 44)
     }
 
-    private var linkToggle: some View {
-        Button {
-            state.setBorderLinked(!state.document.border.linked)
-        } label: {
-            Image(systemName: "link")
-                .font(.system(size: 14, weight: .semibold))
-                .frame(width: 32, height: 32)
-                .background(
-                    Circle().fill(state.document.border.linked ? Color.mosaicAccent : Color.white.opacity(0.12))
-                )
-                .foregroundStyle(state.document.border.linked ? Color.black : Color.white.opacity(0.7))
-        }
-        .frame(minWidth: 44, minHeight: 44)
-    }
-
-    private var innerBinding: Binding<Double> {
+    private var thicknessBinding: Binding<Double> {
         Binding(
             get: { state.document.border.inner / borderFractionCeiling * 100 },
-            set: { state.setBorderInner(max(0, min($0, 100)) / 100 * borderFractionCeiling) }
-        )
-    }
-
-    private var outerBinding: Binding<Double> {
-        Binding(
-            get: { state.document.border.outer / borderFractionCeiling * 100 },
-            set: { state.setBorderOuter(max(0, min($0, 100)) / 100 * borderFractionCeiling) }
+            set: { state.setBorderThickness(max(0, min($0, 100)) / 100 * borderFractionCeiling) }
         )
     }
 
@@ -96,26 +73,15 @@ struct BorderTrayView: View {
     // MARK: Swatches
 
     private var swatchRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                ForEach(Array(state.derivedSwatches.enumerated()), id: \.offset) { _, rgba in
-                    swatch(rgba)
-                }
-                swatch(.white)
-                swatch(RGBA(r: 0, g: 0, b: 0, a: 1))
-                swatch(RGBA(r: 0.110, g: 0.110, b: 0.118, a: 1)) // #1C1C1E
-                swatch(RGBA(r: 0.282, g: 0.282, b: 0.290, a: 1)) // #48484A
-                swatch(RGBA(r: 0.557, g: 0.557, b: 0.576, a: 1)) // #8E8E93
-                swatch(RGBA(r: 0.961, g: 0.937, b: 0.902, a: 1)) // #F5EFE6 warm cream
-                swatch(RGBA(r: 0.063, g: 0.094, b: 0.157, a: 1)) // #101828 deep navy
-                ForEach(Array(state.customSwatches.enumerated()), id: \.offset) { _, rgba in
-                    swatch(rgba)
-                }
-                addSwatchButton
-            }
-            .padding(.horizontal, 16)
+        HStack(spacing: 10) {
+            swatch(.white)
+            swatch(RGBA(r: 0, g: 0, b: 0, a: 1))
+            swatch(state.derivedSwatches.bright)
+            swatch(state.derivedSwatches.mid)
+            swatch(state.derivedSwatches.dark)
+            addSwatchButton
         }
-        .frame(height: 44)
+        .padding(.horizontal, 16)
     }
 
     private func swatch(_ rgba: RGBA) -> some View {
@@ -126,9 +92,9 @@ struct BorderTrayView: View {
             Circle()
                 .fill(Color(red: rgba.r, green: rgba.g, blue: rgba.b, opacity: rgba.a))
                 .overlay(Circle().stroke(Color.black.opacity(0.35), lineWidth: 1))
-                .overlay(Circle().stroke(Color.mosaicAccent, lineWidth: isActive ? 2.5 : 0))
-                .frame(width: 30, height: 30)
-                .frame(width: 44, height: 44)
+                .overlay(Circle().stroke(Color.mosaicAccent, lineWidth: isActive ? 2 : 0))
+                .frame(width: 36, height: 36)
+                .frame(minWidth: 44, minHeight: 44)
         }
     }
 
@@ -141,11 +107,11 @@ struct BorderTrayView: View {
                 .overlay(Circle().stroke(Color.white.opacity(0.3), lineWidth: 1))
                 .overlay(
                     Image(systemName: "plus")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.8))
                 )
-                .frame(width: 30, height: 30)
-                .frame(width: 44, height: 44)
+                .frame(width: 36, height: 36)
+                .frame(minWidth: 44, minHeight: 44)
         }
     }
 

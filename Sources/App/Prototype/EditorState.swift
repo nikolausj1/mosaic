@@ -8,7 +8,6 @@
 import Observation
 import UIKit
 import CoreGraphics
-import CoreImage
 import Photos
 import Vision
 
@@ -68,16 +67,15 @@ final class EditorState {
     }
     var activeTray: ActiveTray = .none
 
-    // MARK: - Border swatches (Phase 4)
+    // MARK: - Border swatches (design revision, 2026-07-17)
 
-    /// Per-photo average colors (deduped, capped at 4), computed once here
-    /// at editor-open time - not recomputed on Replace/Remove, matching
-    /// "computed once when the editor opens" in the task brief.
-    private(set) var derivedSwatches: [RGBA] = []
-    /// User-picked custom colors (from the system color picker), persisted
-    /// across editor sessions.
-    private(set) var customSwatches: [RGBA] = []
-    private static let customSwatchesDefaultsKey = "mosaic.customBorderSwatches.v1"
+    /// Three colors sampled from every photo's downsampled pixels (see
+    /// `computeSampledSwatches`), computed once here at editor-open time -
+    /// not recomputed on Replace/Remove, matching "computed once when the
+    /// editor opens" in the task brief. Restore is the exception: `images`
+    /// starts empty there, so `refreshDerivedSwatches()` recomputes once
+    /// every photo has finished loading (see its doc comment).
+    private(set) var derivedSwatches: SampledBorderColors = .fallback
 
     // MARK: - Canvas sizing
 
@@ -136,8 +134,7 @@ final class EditorState {
         self.images = images
         self.photoStore = photoStore
         self.layoutIndex = layoutIndex
-        self.derivedSwatches = Self.computeDerivedSwatches(document: document, images: images)
-        self.customSwatches = Self.loadCustomSwatches()
+        self.derivedSwatches = Self.computeSampledSwatches(document: document, images: images)
         // `didSet` doesn't fire for this initializer's own assignment above
         // (Swift property-observer semantics) - schedule the first autosave
         // explicitly so current.json exists as soon as the editor opens.
@@ -186,7 +183,7 @@ final class EditorState {
     /// asynchronously, so the caller (ContentView's restore flow) calls this
     /// once every photo has finished loading.
     func refreshDerivedSwatches() {
-        derivedSwatches = Self.computeDerivedSwatches(document: document, images: images)
+        derivedSwatches = Self.computeSampledSwatches(document: document, images: images)
     }
 
     /// Call once at the very start of any gesture that might mutate
@@ -304,24 +301,21 @@ final class EditorState {
         return (Double(photo.pixelWidth), Double(photo.pixelHeight))
     }
 
-    // MARK: - Border tray (Phase 4)
+    // MARK: - Border tray (design revision, 2026-07-17: one THICKNESS slider
+    // replaces the old linked Inner/Outer pair)
 
     /// Slider drags call `beginGesture()`/`commitGesture()` around a whole
     /// interaction (see BorderTrayView) so a multi-step drag collapses to
-    /// ONE undo snapshot; these setters just mutate `document` live in
+    /// ONE undo snapshot; this setter just mutates `document` live in
     /// between, mirroring GestureController's divider-drag pattern.
-    func setBorderInner(_ fraction: Double) {
+    /// `border.linked` stays `true` unconditionally now - the model field is
+    /// kept only for persistence compatibility with documents saved before
+    /// this revision (no UI ever reads it anymore).
+    func setBorderThickness(_ fraction: Double) {
         var doc = document
         doc.border.inner = fraction
-        if doc.border.linked { doc.border.outer = fraction }
-        doc = reclampAll(doc, canvasSize: canvasSize)
-        document = doc
-    }
-
-    func setBorderOuter(_ fraction: Double) {
-        var doc = document
         doc.border.outer = fraction
-        if doc.border.linked { doc.border.inner = fraction }
+        doc.border.linked = true
         doc = reclampAll(doc, canvasSize: canvasSize)
         document = doc
     }
@@ -334,19 +328,10 @@ final class EditorState {
         document = doc
     }
 
-    /// The link toggle is a discrete tap, not a drag - one undo snapshot of
-    /// its own, matching the toggle-style actions elsewhere (toggleAuto).
-    func setBorderLinked(_ linked: Bool) {
-        let old = document
-        var doc = document
-        doc.border.linked = linked
-        if linked { doc.border.outer = doc.border.inner }
-        doc = reclampAll(doc, canvasSize: canvasSize)
-        document = doc
-        pushUndo(old)
-    }
-
-    /// Swatch tap: one undo snapshot, no reclamp needed (color is paint-only).
+    /// Swatch tap (including a color freshly picked from the system color
+    /// picker): one undo snapshot, no reclamp needed (color is paint-only).
+    /// Picked colors are applied directly and are NOT appended to the
+    /// swatch row - there's no more persisted custom-swatch list.
     func setBorderColor(_ color: RGBA) {
         let old = document
         var doc = document
@@ -355,77 +340,156 @@ final class EditorState {
         pushUndo(old)
     }
 
-    /// Appends a custom color from the system color picker to the swatch
-    /// row and persists it (RGBA JSON array) in UserDefaults so it survives
-    /// future editor sessions. Also applies it as the current border color
-    /// (one undo snapshot, same as any other swatch tap).
-    func addCustomSwatch(_ color: RGBA) {
-        customSwatches.append(color)
-        Self.saveCustomSwatches(customSwatches)
-        setBorderColor(color)
-    }
-
-    private static func loadCustomSwatches() -> [RGBA] {
-        guard let data = UserDefaults.standard.data(forKey: customSwatchesDefaultsKey),
-              let decoded = try? JSONDecoder().decode([RGBA].self, from: data)
-        else { return [] }
-        return decoded
-    }
-
-    private static func saveCustomSwatches(_ swatches: [RGBA]) {
-        guard let data = try? JSONEncoder().encode(swatches) else { return }
-        UserDefaults.standard.set(data, forKey: customSwatchesDefaultsKey)
-    }
-
-    /// Per-photo average color (CIAreaAverage on each proxy UIImage),
-    /// deduped by simple RGB distance, capped at 4 - "derived suggestions"
-    /// shown first in the swatch row. Computed once at init; never
-    /// recomputed on Replace/Remove (those change which photos exist, but
-    /// re-deriving suggestions mid-session would make the swatch row
-    /// reshuffle under the user while they're picking a border color).
-    private static func computeDerivedSwatches(document: Document, images: [PhotoID: UIImage]) -> [RGBA] {
+    /// Three colors sampled from every photo currently in the document,
+    /// shown in the swatch row alongside plain white/black. Downsamples
+    /// each proxy UIImage to ~48x48, buckets pixels into 4-bits-per-channel
+    /// (16 levels/channel) histogram cells across ALL photos combined, then
+    /// picks:
+    ///  - `bright`: highest-V bucket among those with saturation > 0.25 and
+    ///    a pixel share >= 0.3% (fallback: highest-V bucket, any saturation)
+    ///  - `dark`: lowest-V bucket with pixel share >= 0.3%, preferring V in
+    ///    0.05...0.4 so it reads as a dark COLOR rather than near-black
+    ///    (fallback: lowest-V bucket meeting the share threshold, then
+    ///    lowest-V overall)
+    ///  - `mid`: highest-pixel-share bucket with 0.3 < V < 0.75 - the
+    ///    photos' dominant tone (fallback: highest-share bucket overall)
+    /// Any two results within 0.08 RGB-euclidean distance of each other are
+    /// deduped by walking to the next-best candidate for the later one, in
+    /// bright -> mid -> dark order. Falls back to neutral grays if no
+    /// photo has finished loading yet (`images` empty / zero opaque
+    /// pixels), so the swatch row always has exactly 3 sampled swatches.
+    private static func computeSampledSwatches(document: Document, images: [PhotoID: UIImage]) -> SampledBorderColors {
         let ids = photoIDs(in: document.root)
-        var result: [RGBA] = []
+
+        struct BucketAccumulator {
+            var rSum: Double = 0
+            var gSum: Double = 0
+            var bSum: Double = 0
+            var count: Int = 0
+        }
+
+        var buckets: [Int: BucketAccumulator] = [:]
+        var totalCount = 0
+
         for id in ids {
-            guard let image = images[id], let color = averageColor(of: image) else { continue }
-            let isDuplicate = result.contains { existing in
-                let dr = existing.r - color.r
-                let dg = existing.g - color.g
-                let db = existing.b - color.b
-                return (dr * dr + dg * dg + db * db).squareRoot() < 0.08
+            guard let image = images[id] else { continue }
+            for pixel in downsampledPixels(of: image, dimension: 48) {
+                guard pixel.a > 0 else { continue }
+                let rb = min(15, Int(pixel.r * 255) >> 4)
+                let gb = min(15, Int(pixel.g * 255) >> 4)
+                let bb = min(15, Int(pixel.b * 255) >> 4)
+                let key = (rb << 8) | (gb << 4) | bb
+                var bucket = buckets[key] ?? BucketAccumulator()
+                bucket.rSum += pixel.r
+                bucket.gSum += pixel.g
+                bucket.bSum += pixel.b
+                bucket.count += 1
+                buckets[key] = bucket
+                totalCount += 1
             }
-            guard !isDuplicate else { continue }
-            result.append(color)
-            if result.count == 4 { break }
+        }
+
+        guard totalCount > 0 else { return .fallback }
+
+        struct Candidate {
+            let rgba: RGBA
+            let s: Double
+            let v: Double
+            let fraction: Double
+        }
+
+        let candidates: [Candidate] = buckets.values.map { bucket in
+            let c = Double(bucket.count)
+            let r = bucket.rSum / c, g = bucket.gSum / c, b = bucket.bSum / c
+            let (_, s, v) = rgbToHSV(r: r, g: g, b: b)
+            return Candidate(rgba: RGBA(r: r, g: g, b: b, a: 1), s: s, v: v, fraction: c / Double(totalCount))
+        }
+
+        func distance(_ a: RGBA, _ b: RGBA) -> Double {
+            let dr = a.r - b.r, dg = a.g - b.g, db = a.b - b.b
+            return (dr * dr + dg * dg + db * db).squareRoot()
+        }
+
+        func firstDistinct(_ sorted: [Candidate], excluding chosen: [RGBA]) -> Candidate? {
+            for candidate in sorted where chosen.allSatisfy({ distance($0, candidate.rgba) >= 0.08 }) {
+                return candidate
+            }
+            return sorted.first
+        }
+
+        // Bright: highest V among saturated (>0.25), well-represented (>=0.3%) buckets.
+        let brightQuota = candidates.filter { $0.s > 0.25 && $0.fraction >= 0.003 }
+        let brightSorted = (brightQuota.isEmpty ? candidates : brightQuota).sorted { $0.v > $1.v }
+
+        // Dark: lowest V among well-represented buckets, preferring a dark COLOR (V 0.05...0.4).
+        let darkQuota = candidates.filter { $0.fraction >= 0.003 }
+        let darkPreferred = darkQuota.filter { $0.v >= 0.05 && $0.v <= 0.4 }
+        let darkPool = !darkPreferred.isEmpty ? darkPreferred : (!darkQuota.isEmpty ? darkQuota : candidates)
+        let darkSorted = darkPool.sorted { $0.v < $1.v }
+
+        // Mid: highest-share bucket in the mid-tone band (0.3 < V < 0.75) - the dominant tone.
+        let midBand = candidates.filter { $0.v > 0.3 && $0.v < 0.75 }
+        let midSorted = (midBand.isEmpty ? candidates : midBand).sorted { $0.fraction > $1.fraction }
+
+        guard let bright = brightSorted.first else { return .fallback }
+        let mid = firstDistinct(midSorted, excluding: [bright.rgba]) ?? midSorted.first ?? bright
+        let dark = firstDistinct(darkSorted, excluding: [bright.rgba, mid.rgba]) ?? darkSorted.first ?? bright
+
+        return SampledBorderColors(bright: bright.rgba, mid: mid.rgba, dark: dark.rgba)
+    }
+
+    /// Draws `image` into a `dimension`x`dimension` RGBA bitmap (ignoring
+    /// aspect - this is a color histogram sample, not a faithful crop) and
+    /// returns its opaque-or-translucent pixels as normalized 0...1 floats.
+    private static func downsampledPixels(of image: UIImage, dimension: Int) -> [(r: Double, g: Double, b: Double, a: Double)] {
+        guard let cgImage = image.cgImage else { return [] }
+        var pixelData = [UInt8](repeating: 0, count: dimension * dimension * 4)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: &pixelData,
+            width: dimension,
+            height: dimension,
+            bitsPerComponent: 8,
+            bytesPerRow: dimension * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return [] }
+        context.interpolationQuality = .low
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: dimension, height: dimension))
+
+        var result: [(r: Double, g: Double, b: Double, a: Double)] = []
+        result.reserveCapacity(dimension * dimension)
+        for i in stride(from: 0, to: pixelData.count, by: 4) {
+            let a = Double(pixelData[i + 3]) / 255.0
+            guard a > 0 else { continue }
+            result.append((
+                r: Double(pixelData[i]) / 255.0,
+                g: Double(pixelData[i + 1]) / 255.0,
+                b: Double(pixelData[i + 2]) / 255.0,
+                a: a
+            ))
         }
         return result
     }
 
-    private static func averageColor(of image: UIImage) -> RGBA? {
-        guard let ciImage = CIImage(image: image) else { return nil }
-        let extentVector = CIVector(
-            x: ciImage.extent.origin.x, y: ciImage.extent.origin.y,
-            z: ciImage.extent.size.width, w: ciImage.extent.size.height
-        )
-        guard let filter = CIFilter(name: "CIAreaAverage", parameters: [
-            kCIInputImageKey: ciImage,
-            kCIInputExtentKey: extentVector
-        ]), let outputImage = filter.outputImage else { return nil }
-
-        var bitmap = [UInt8](repeating: 0, count: 4)
-        let context = CIContext(options: [.workingColorSpace: NSNull()])
-        context.render(
-            outputImage, toBitmap: &bitmap, rowBytes: 4,
-            bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
-            format: .RGBA8, colorSpace: nil
-        )
-        guard bitmap[3] > 0 else { return nil }
-        return RGBA(
-            r: Double(bitmap[0]) / 255.0,
-            g: Double(bitmap[1]) / 255.0,
-            b: Double(bitmap[2]) / 255.0,
-            a: 1.0
-        )
+    private static func rgbToHSV(r: Double, g: Double, b: Double) -> (h: Double, s: Double, v: Double) {
+        let maxV = max(r, g, b)
+        let minV = min(r, g, b)
+        let delta = maxV - minV
+        let v = maxV
+        let s = maxV == 0 ? 0 : delta / maxV
+        guard delta > 0 else { return (0, s, v) }
+        var h: Double
+        if maxV == r {
+            h = ((g - b) / delta).truncatingRemainder(dividingBy: 6)
+        } else if maxV == g {
+            h = (b - r) / delta + 2
+        } else {
+            h = (r - g) / delta + 4
+        }
+        h *= 60
+        if h < 0 { h += 360 }
+        return (h, s, v)
     }
 
     // MARK: - Photo toolbar actions (Phase 4)
@@ -612,4 +676,20 @@ struct SwapState {
     let sourceCellRect: CGRect
     var fingerLocation: CGPoint
     var hoveredTargetID: PhotoID?
+}
+
+/// The Border tray's three sampled swatches (see
+/// `EditorState.computeSampledSwatches`). `.fallback` is neutral grays,
+/// used before any photo has finished loading (e.g. mid-restore) so the
+/// swatch row always renders exactly 3 sampled circles.
+struct SampledBorderColors: Equatable {
+    var bright: RGBA
+    var mid: RGBA
+    var dark: RGBA
+
+    static let fallback = SampledBorderColors(
+        bright: RGBA(r: 0.85, g: 0.85, b: 0.85, a: 1),
+        mid: RGBA(r: 0.5, g: 0.5, b: 0.5, a: 1),
+        dark: RGBA(r: 0.2, g: 0.2, b: 0.2, a: 1)
+    )
 }
