@@ -62,6 +62,14 @@ struct CanvasView: View {
                 photoCell(cell)
             }
 
+            // Always-on hairline canvas edge (Justin, 2026-07-17): 1px at
+            // ~12% white so the canvas boundary - and especially a BLACK
+            // border - stays legible against the #0B0B0D surround. UI
+            // chrome only; the export renders nothing for this.
+            Rectangle()
+                .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                .frame(width: state.canvasSize.width, height: state.canvasSize.height)
+
             // Overlay chrome hides while a border slider is live so the
             // border itself is visible (accent capsules/outline sit exactly
             // on the seams being adjusted).

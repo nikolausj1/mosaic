@@ -466,6 +466,13 @@ private struct DebugUIStateModifier: ViewModifier {
                     doc.photos[id] = photo
                 }
                 state.document = reclampAll(doc, canvasSize: state.canvasSize)
+            case "borderBlack":
+                var doc = state.document
+                doc.border.color = RGBA(r: 0, g: 0, b: 0, a: 1)
+                doc.border.inner = 0.03
+                doc.border.outer = 0.03
+                state.document = reclampAll(doc, canvasSize: state.canvasSize)
+                state.activeTray = .border
             case "rotated":
                 // Rendering-math check: rotate the first photo 90 and pan it
                 // off-center so the effective-space offset formula is
