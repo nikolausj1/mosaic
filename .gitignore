@@ -1,0 +1,18 @@
+# Personal tooling - never in the repo (Build Guide kickoff checklist)
+Project Build Guide.md
+PRD Template.md
+_inbox/
+_review/
+
+# Generated - project.yml is the source of truth (xcodegen generate)
+*.xcodeproj
+
+# Build artifacts
+DerivedData/
+build/
+
+# macOS
+.DS_Store
+
+# Secrets
+.env
