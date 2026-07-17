@@ -363,6 +363,8 @@ indirect enum Node: Codable, Equatable {
 
 struct PhotoRef: Codable, Equatable {
     var assetLocalIdentifier: String   // PHAsset
+    var pixelWidth: Int                // source dimensions, captured at pick time -
+    var pixelHeight: Int               // the pure-Foundation engine cannot ask PHAsset
     var zoom: Double                   // 1.0 == aspect-fill. INVARIANT: 1.0...8.0, never below 1.0
     var center: CGPoint                // normalized 0...1 in the photo's own space; the point at the cell's center
     var flipH: Bool
