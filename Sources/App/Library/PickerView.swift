@@ -268,6 +268,14 @@ struct PickerView: View {
     /// `.replace` mode's completion (Phase 4): the single freshly-loaded
     /// asset, handed to `EditorState.replace(photoID:image:pixelSize:...)`.
     var onReplaceConfirmed: ((UIImage, CGSize, PHAsset?) -> Void)? = nil
+    /// Phase 6 persistence: whether `last.json` exists - shows the "Edit
+    /// last collage" entry point below the header when true. Left `false`
+    /// (the default) for the `.replace`-mode picker EditorView presents as a
+    /// sheet, which never wants this.
+    var hasLastCollage: Bool = false
+    /// Tapping "Edit last collage" - the caller (ContentView) promotes
+    /// last.json to current.json and restores it into the editor.
+    var onEditLastCollage: (() -> Void)? = nil
 
     @State private var showAlbumMenu = false
     @State private var showFallbackPicker = false
@@ -277,6 +285,15 @@ struct PickerView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            // Shown regardless of photo-library authorization state (unlike
+            // the grid/denied/loading `content` below): resuming a
+            // previously-saved document never needs a NEW pick, so this
+            // shouldn't be gated behind permission resolution - a user who
+            // hasn't granted (or has denied) photo access can still get back
+            // into their last collage.
+            if hasLastCollage, state.mode == .pick {
+                editLastCollageBanner
+            }
             content
         }
         .background(backgroundColor.ignoresSafeArea())
@@ -368,6 +385,27 @@ struct PickerView: View {
         @unknown default:
             ProgressView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// Phase 6 persistence contract: shown whenever `last.json` exists
+    /// (Launch-with-no-current.json and New-collage-discard both route here
+    /// with it available). Tapping it promotes last -> current and restores
+    /// straight into the editor - the picker never re-shows the old photos.
+    private var editLastCollageBanner: some View {
+        Button {
+            onEditLastCollage?()
+        } label: {
+            HStack {
+                Image(systemName: "arrow.uturn.backward.circle")
+                Text("Edit last collage")
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+            }
+            .padding(12)
+            .foregroundStyle(Color.mosaicAccent)
+            .background(Color.white.opacity(0.06))
         }
     }
 

@@ -17,10 +17,23 @@ final class EditorState {
 
     // MARK: - Persistent state
 
-    var document: Document
+    /// Every mutation autosaves (debounced ~0.5s) via `scheduleAutosave()` -
+    /// see the Autosave section below. `didSet` fires on every assignment
+    /// EXCEPT the one made in `init` (Swift property-observer semantics), so
+    /// `init` schedules the initial autosave itself.
+    var document: Document {
+        didSet { scheduleAutosave() }
+    }
     private(set) var undoStack: [Document] = []
     private(set) var redoStack: [Document] = []
     var selection: PhotoID?
+
+    /// PhotoIDs whose source asset could not be found on restore (deleted
+    /// from the library since the document was last autosaved). Populated by
+    /// the restore flow (ContentView), cleared by `replace(...)` once the
+    /// user picks a new asset for that id. Non-empty blocks Save (PRD:
+    /// "Photo unavailable... Save is blocked").
+    var unavailablePhotoIDs: Set<PhotoID> = []
     /// Was `let` through Phase 3. Phase 4's Replace action swaps in a new
     /// UIImage for an existing PhotoID (the document keeps the same id, so
     /// undo restoring an older Document still renders fine against
@@ -125,6 +138,55 @@ final class EditorState {
         self.layoutIndex = layoutIndex
         self.derivedSwatches = Self.computeDerivedSwatches(document: document, images: images)
         self.customSwatches = Self.loadCustomSwatches()
+        // `didSet` doesn't fire for this initializer's own assignment above
+        // (Swift property-observer semantics) - schedule the first autosave
+        // explicitly so current.json exists as soon as the editor opens.
+        scheduleAutosave()
+    }
+
+    // MARK: - Autosave (Phase 6)
+
+    /// Debounced ~0.5s after any document/image mutation. `.common` run-loop
+    /// mode so the timer still fires while a gesture's tracking loop is live.
+    private var autosaveTimer: Timer?
+
+    private func scheduleAutosave() {
+        autosaveTimer?.invalidate()
+        let timer = Timer(timeInterval: 0.5, repeats: false) { [weak self] _ in
+            self?.performAutosave()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        autosaveTimer = timer
+    }
+
+    /// Cancels any pending debounce and writes immediately - called on
+    /// scenePhase .background/.inactive (see EditorView) so a backgrounded
+    /// app never loses the last ~0.5s of edits.
+    func flushAutosaveNow() {
+        autosaveTimer?.invalidate()
+        autosaveTimer = nil
+        performAutosave()
+    }
+
+    private func performAutosave() {
+        DocumentStore.saveCurrent(document)
+        for (id, photo) in document.photos where photo.assetLocalIdentifier.isEmpty {
+            if let image = images[id] {
+                DocumentStore.saveProxyIfNeeded(photoID: id, image: image)
+            }
+        }
+        let referenced = [document] + (DocumentStore.loadLast().map { [$0] } ?? [])
+        DocumentStore.garbageCollectProxies(referencedDocuments: referenced)
+    }
+
+    /// Recomputes the border tray's derived swatches against whatever images
+    /// are currently loaded. Normally swatches are computed once at init
+    /// (see `derivedSwatches`'s doc comment) against a fully-loaded `images`
+    /// dict; restore is the one path where `images` starts empty and fills in
+    /// asynchronously, so the caller (ContentView's restore flow) calls this
+    /// once every photo has finished loading.
+    func refreshDerivedSwatches() {
+        derivedSwatches = Self.computeDerivedSwatches(document: document, images: images)
     }
 
     /// Call once at the very start of any gesture that might mutate
@@ -487,6 +549,10 @@ final class EditorState {
         photo.roi = roi
 
         updateImage(photoID, image: image)
+        // The replaced asset is a fresh pick, so this id is no longer
+        // "unavailable" even if it was before (PRD: "Replace on that photo
+        // clears it from the set").
+        unavailablePhotoIDs.remove(photoID)
 
         var doc = document
         doc.photos[photoID] = photo
@@ -497,8 +563,13 @@ final class EditorState {
         pushUndo(old)
     }
 
+    /// Also used by the restore flow (ContentView) to fill in `images`
+    /// progressively as each photo's proxy/asset finishes loading - not just
+    /// by `replace(...)`. Schedules an autosave so a freshly-loaded
+    /// PHPicker-fallback proxy gets written to its sidecar file promptly.
     func updateImage(_ id: PhotoID, image: UIImage) {
         images[id] = image
+        scheduleAutosave()
     }
 
     // MARK: - Auto-frame toggle

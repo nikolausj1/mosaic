@@ -136,12 +136,30 @@ struct CanvasView: View {
         .clipped()
     }
 
+    /// Phase 6 (additive only - no gesture/render math touched): a cell
+    /// whose photo isn't loaded yet renders a shimmer while restore is still
+    /// fetching it, or a "Photo unavailable" placeholder if restore
+    /// determined the source asset is gone. Tapping either still resolves to
+    /// `.photo(id, rect)` in `classifyTouch` (unaffected by whether `image`
+    /// is loaded), so selection - and therefore Replace - keeps working.
     @ViewBuilder
     private func photoCell(_ cell: CellFrame) -> some View {
-        if let ref = state.document.photos[cell.id], let image = state.images[cell.id] {
-            cellContent(ref: ref, image: image, cellSize: cell.rect.size)
-                .opacity(state.swapState?.sourceID == cell.id ? 0.85 : 1.0)
-                .offset(x: cell.rect.minX, y: cell.rect.minY)
+        if let ref = state.document.photos[cell.id] {
+            if let image = state.images[cell.id] {
+                cellContent(ref: ref, image: image, cellSize: cell.rect.size)
+                    .opacity(state.swapState?.sourceID == cell.id ? 0.85 : 1.0)
+                    .offset(x: cell.rect.minX, y: cell.rect.minY)
+            } else if state.unavailablePhotoIDs.contains(cell.id) {
+                UnavailablePlaceholder()
+                    .frame(width: cell.rect.width, height: cell.rect.height)
+                    .clipped()
+                    .offset(x: cell.rect.minX, y: cell.rect.minY)
+            } else {
+                ShimmerPlaceholder()
+                    .frame(width: cell.rect.width, height: cell.rect.height)
+                    .clipped()
+                    .offset(x: cell.rect.minX, y: cell.rect.minY)
+            }
         }
     }
 
@@ -251,6 +269,58 @@ struct CanvasView: View {
                 .shadow(radius: 12)
                 .frame(width: swap.sourceCellRect.width, height: swap.sourceCellRect.height)
                 .position(x: swap.fingerLocation.x, y: swap.fingerLocation.y)
+        }
+    }
+}
+
+// MARK: - Phase 6 edge-state placeholders (additive view code only)
+
+/// Restore is still fetching this photo's proxy/asset - a subtle animated
+/// gradient sweep on the surface color, standing in for the missing image.
+private struct ShimmerPlaceholder: View {
+    @State private var sweep = false
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                Color.mosaicSurface
+                LinearGradient(
+                    colors: [.clear, Color.white.opacity(0.14), .clear],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: max(geo.size.width, geo.size.height) * 0.6)
+                .offset(x: sweep ? geo.size.width : -geo.size.width)
+            }
+        }
+        .clipped()
+        .onAppear {
+            withAnimation(.linear(duration: 1.15).repeatForever(autoreverses: false)) {
+                sweep = true
+            }
+        }
+    }
+}
+
+/// The source asset was deleted from the library since this document was
+/// last autosaved (PRD: "Photo unavailable... tap to replace"). Selection
+/// still works over this cell (see `photoCell`'s doc comment); EditorView
+/// additionally opens the Replace sheet directly on selecting one of these.
+private struct UnavailablePlaceholder: View {
+    var body: some View {
+        ZStack {
+            Color.mosaicSurface
+            VStack(spacing: 6) {
+                Image(systemName: "photo.slash")
+                    .font(.system(size: 22, weight: .medium))
+                Text("Photo unavailable")
+                    .font(.system(size: 12, weight: .semibold))
+                Text("Tap to replace")
+                    .font(.system(size: 11))
+                    .opacity(0.7)
+            }
+            .foregroundStyle(.white.opacity(0.75))
+            .multilineTextAlignment(.center)
         }
     }
 }

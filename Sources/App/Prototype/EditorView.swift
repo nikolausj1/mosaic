@@ -30,6 +30,7 @@ struct EditorView: View {
     /// "last collage" archiving on top of this same hook).
     var onDone: (() -> Void)? = nil
 
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("hasSeenEditor") private var hasSeenEditor: Bool = false
     @State private var hasAppliedFirstLaunchSelection = false
     @State private var showDiscardConfirm = false
@@ -41,6 +42,7 @@ struct EditorView: View {
     @State private var showSaveError = false
     #if DEBUG
     @State private var didRunAutoSaveDebugHook = false
+    @State private var didRunSimulateUnavailableDebugHook = false
     #endif
 
     var body: some View {
@@ -90,8 +92,23 @@ struct EditorView: View {
             // photo swaps the whole bottom bar to the photo toolbar, so any
             // open tray is stale the instant a selection lands.
             if newSelection != nil { state.activeTray = .none }
+            // Phase 6: selecting an unavailable photo (placeholder cell tap)
+            // opens the Replace sheet directly, via the same selection
+            // mechanism a normal photo tap already uses - no gesture/hit-test
+            // changes needed. Toolbar Replace still works as the fallback.
+            if let newSelection, state.unavailablePhotoIDs.contains(newSelection) {
+                replaceTarget = newSelection
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            // PRD persistence contract: autosave is debounced ~0.5s, but a
+            // backgrounded/inactive app must not lose that last half-second.
+            if newPhase == .background || newPhase == .inactive {
+                state.flushAutosaveNow()
+            }
         }
         .applyDebugUIStateLaunchArg(state: state)
+        .applyDebugAutoDoneLaunchArg(showSaveSheet: $showSaveSheet, onDone: onDone)
     }
 
     // MARK: - Save (Phase 5)
@@ -104,6 +121,15 @@ struct EditorView: View {
     @MainActor
     private func performSave() async {
         guard !state.isExporting else { return }
+        // PRD: "Photo unavailable... Save is blocked" with an explanatory
+        // alert. The Save button is also visually disabled in this state
+        // (see `topBar`), but this guard covers the -autoSave debug hook and
+        // the alert's own Retry button too.
+        guard state.unavailablePhotoIDs.isEmpty else {
+            saveErrorMessage = "Replace the unavailable photo before saving."
+            showSaveError = true
+            return
+        }
         state.isExporting = true
         let canvasSize = state.canvasSize
         let document = state.document
@@ -203,16 +229,23 @@ struct EditorView: View {
                 .padding(.vertical, 8)
                 .background(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(onSave == nil ? Color.mosaicAccent.opacity(0.25) : Color.mosaicAccent)
+                        .fill(saveEnabled ? Color.mosaicAccent : Color.mosaicAccent.opacity(0.25))
                 )
-                .foregroundStyle(onSave == nil ? Color.white.opacity(0.4) : Color.black)
+                .foregroundStyle(saveEnabled ? Color.black : Color.white.opacity(0.4))
             }
-            .disabled(onSave == nil || state.isExporting)
+            .disabled(!saveEnabled || state.isExporting)
         }
         .padding(.horizontal, 8)
         .foregroundStyle(Color.mosaicAccent)
         .frame(height: 52)
         .background(Color.mosaicSurface)
+    }
+
+    /// PRD: Save is blocked while any photo is unavailable (deleted from the
+    /// library since autosave) - both visually (this gates the button's
+    /// tint/label color) and functionally (`performSave`'s own guard).
+    private var saveEnabled: Bool {
+        onSave != nil && state.unavailablePhotoIDs.isEmpty
     }
 
     private func barLabel(_ text: String) -> some View {
@@ -226,6 +259,7 @@ struct EditorView: View {
         hasAppliedFirstLaunchSelection = true
         defer {
             #if DEBUG
+            triggerSimulateUnavailableDebugHookIfNeeded()
             triggerAutoSaveDebugHookIfNeeded()
             #endif
         }
@@ -235,6 +269,23 @@ struct EditorView: View {
         state.selection = cells.first?.id
         hasSeenEditor = true
     }
+
+    // MARK: - Debug verification hook (-simulateUnavailable launch arg, DEBUG only)
+
+    #if DEBUG
+    /// Forces the "photo unavailable" edge state for screenshots/testing
+    /// without needing to actually delete an asset from the library mid-run:
+    /// marks the first photo (in leaf order) unavailable after the editor
+    /// appears, regardless of whether this run got here via restore, a fresh
+    /// pick, or -protoLayout/-autoPick.
+    private func triggerSimulateUnavailableDebugHookIfNeeded() {
+        guard !didRunSimulateUnavailableDebugHook else { return }
+        guard ProcessInfo.processInfo.arguments.contains("-simulateUnavailable") else { return }
+        didRunSimulateUnavailableDebugHook = true
+        guard let firstID = photoIDs(in: state.document.root).first else { return }
+        state.unavailablePhotoIDs.insert(firstID)
+    }
+    #endif
 
     // MARK: - Debug verification hook (-autoSave launch arg, DEBUG only)
 
@@ -349,5 +400,43 @@ private struct DebugUIStateModifier: ViewModifier {
 private extension View {
     func applyDebugUIStateLaunchArg(state: EditorState) -> some View {
         modifier(DebugUIStateModifier(state: state))
+    }
+}
+
+// MARK: - Debug verification hook (-autoDone launch arg)
+
+#if DEBUG
+/// The save sheet's Done button can't be automated by simctl taps (it's
+/// inside a system sheet), so `-autoDone` drives it programmatically: 2s
+/// after `showSaveSheet` becomes true (from either a real Save tap or the
+/// `-autoSave` hook above), dismiss the sheet and fire `onDone` exactly like
+/// a real Done tap - which is what runs the "current.json -> last.json"
+/// archiving (see ContentView.onDone).
+private struct DebugAutoDoneModifier: ViewModifier {
+    @Binding var showSaveSheet: Bool
+    var onDone: (() -> Void)?
+    @State private var didRun = false
+
+    func body(content: Content) -> some View {
+        content.onChange(of: showSaveSheet) { _, isShown in
+            guard isShown, !didRun, ProcessInfo.processInfo.arguments.contains("-autoDone") else { return }
+            didRun = true
+            Task {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                showSaveSheet = false
+                onDone?()
+            }
+        }
+    }
+}
+#endif
+
+private extension View {
+    func applyDebugAutoDoneLaunchArg(showSaveSheet: Binding<Bool>, onDone: (() -> Void)?) -> some View {
+        #if DEBUG
+        modifier(DebugAutoDoneModifier(showSaveSheet: showSaveSheet, onDone: onDone))
+        #else
+        self
+        #endif
     }
 }
