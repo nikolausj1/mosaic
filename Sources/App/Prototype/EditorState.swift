@@ -60,6 +60,20 @@ final class EditorState {
     /// target outline.
     var swapState: SwapState?
 
+    // MARK: - Debug event ticker (prototype only)
+
+    /// Rolling log of gesture-classification events, rendered as an on-screen
+    /// HUD so gesture bugs can be diagnosed from the device itself. Remove
+    /// with the rest of the prototype scaffolding after Phase 2 sign-off.
+    private(set) var debugEvents: [String] = []
+    private var debugCounter = 0
+
+    func debugLog(_ message: String) {
+        debugCounter += 1
+        debugEvents.append("\(debugCounter) \(message)")
+        if debugEvents.count > 7 { debugEvents.removeFirst() }
+    }
+
     // MARK: - Gesture snapshot lifecycle
 
     private var gestureStartDocument: Document?

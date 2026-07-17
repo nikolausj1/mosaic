@@ -123,6 +123,16 @@ These could be settled by dumping strings/resources from an Android APK, **which
 **Why not:** re-running on topology or ratio changes makes photos move by themselves, and re-running during a divider drag makes them swim under your finger. The one-shot version slots into the existing `center` field with zero new rules.
 **Revisit signal:** photos that hold multiple subjects are consistently badly framed after a topology change.
 
+### B23 - First pan attempt sometimes not recognized (OPEN BUG, Phase 2)
+**Symptom (Justin, on device, 2026-07-16):** the first finger-drag to pan a photo does nothing; the second attempt pans. "Feels ok for now" - deferred, not resolved.
+**Instrumentation is already in place:** the prototype renders a gesture-event HUD at the bottom of the screen (EditorState.debugEvents / debugLog). When it recurs, the last lines identify the cause directly:
+- `down->photo … hold->swap … up: swap no-target` -> the 0.35s long-press is stealing deliberate pans (natural grab-settle-move rhythm). Fix space: longer hold, bigger slop, or require selection for swap.
+- `down->divider …` / `down->corner …` -> the seam (±11pt) or capsule (44pt) hit zones are too greedy near edges - this would also be evidence against B1's bare-seam decision.
+- `down->photo` then `up: tracking died …` -> drag ticks never crossed the 8pt slop; delivery/threshold problem.
+- `drag suppressed (post-pinch)` -> the dragConsumedByPinch latch over-suppresses.
+- Nothing logged -> hit-testing hole above the gesture layer.
+**Resolution also includes:** removing the debug HUD and debugLog calls at Phase 2 sign-off.
+
 ### B19 - First-launch auto-selection
 **Shipped:** cell one arrives selected on the first-ever entry to the editor, then never again. One persisted boolean.
 **Why:** onboarding is a hard non-goal (Layout's unskippable intro was a nine-year complaint), so the handle grammar must teach itself. A silent self-explaining first state is the only teacher we've allowed. Layout auto-selected on *every* entry and its grammar taught itself for nine years; we take the lesson and skip the permanent cost.

@@ -27,6 +27,23 @@ struct EditorView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color(red: 0.043, green: 0.043, blue: 0.051).ignoresSafeArea())
+        .overlay(alignment: .bottom) { debugHUD }
+    }
+
+    /// Prototype-only gesture event ticker. The last few classification
+    /// events, newest at the bottom. Non-interactive - touches pass through.
+    private var debugHUD: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(state.debugEvents, id: \.self) { event in
+                Text(event)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.75))
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.black.opacity(0.5))
+        .allowsHitTesting(false)
     }
 
     private var topBar: some View {

@@ -399,7 +399,10 @@ final class GestureController {
 
         switch phase {
         case .idle:
-            if dragConsumedByPinch { return } // stale post-pinch drag; ignore until it ends
+            if dragConsumedByPinch {
+                state.debugLog("drag suppressed (post-pinch)")
+                return
+            }
             state.beginGesture()
             beginTouch(at: value.startLocation)
         case .tracking(let info):
@@ -437,8 +440,10 @@ final class GestureController {
         case .tracking(let info):
             endTracking(info, value: value)
         case .pan:
+            state.debugLog("up: pan end")
             endPan(value: value)
         case .divider:
+            state.debugLog("up: divider end")
             phase = .idle
             state.commitGesture()
         case .corner:
@@ -457,15 +462,20 @@ final class GestureController {
         let target = classifyTouch(at: point, document: state.document, canvasSize: state.canvasSize, selection: state.selection)
         switch target {
         case .bracket(let corner):
+            state.debugLog("down->bracket \(corner)")
             phase = .bracket(BracketInfo(corner: corner, originalSize: state.canvasSize, snappedPresetIndex: nil))
         case .corner(let x, let y):
+            state.debugLog("down->corner x\(x.path)/\(x.index) y\(y.path)/\(y.index)")
             phase = .corner(x: makeDividerInfo(x), y: makeDividerInfo(y))
         case .divider(let ref):
+            state.debugLog("down->divider \(ref.path)/\(ref.index) \(ref.axis)")
             phase = .divider(makeDividerInfo(ref))
         case .photo(let id, let rect):
+            state.debugLog("down->photo \(String(id.uuidString.prefix(4)))")
             phase = .tracking(TrackingInfo(cellID: id, cellRect: rect, startLocation: point, startTime: Date()))
             scheduleHoldTimer()
         case .empty:
+            state.debugLog("down->empty")
             phase = .tracking(TrackingInfo(cellID: nil, cellRect: nil, startLocation: point, startTime: Date()))
         }
     }
@@ -502,6 +512,7 @@ final class GestureController {
             phase = .idle // dead-space drag: nothing to pan/swap
             return
         }
+        state.debugLog("tracking->pan")
         beginPan(photoID: cellID, cellRect: cellRect)
     }
 
@@ -512,7 +523,11 @@ final class GestureController {
         let point = value.location
         let dist = hypot(point.x - info.startLocation.x, point.y - info.startLocation.y)
         let elapsed = Date().timeIntervalSince(info.startTime)
-        guard dist <= slop, elapsed < holdDuration else { return }
+        guard dist <= slop, elapsed < holdDuration else {
+            state.debugLog("up: tracking died (dist \(Int(dist)) t \(String(format: "%.2f", elapsed)))")
+            return
+        }
+        state.debugLog("up: tap \(info.cellID == nil ? "deselect" : "select")")
         state.selection = info.cellID // nil deselects (tap resolved on dead space)
     }
 
@@ -624,6 +639,7 @@ final class GestureController {
     }
 
     private func beginPinch(value: MagnifyGesture.Value) {
+        state.debugLog("pinch begin")
         dragConsumedByPinch = true
         let point = value.startLocation
         let (cells, _) = solve(root: state.document.root, canvasSize: state.canvasSize, border: state.document.border)
@@ -803,6 +819,7 @@ final class GestureController {
     // MARK: - Swap
 
     private func beginSwap(photoID: PhotoID, cellRect: CGRect) {
+        state.debugLog("hold->swap")
         state.haptics.thump()
         phase = .swap(sourceID: photoID, sourceCellRect: cellRect)
         state.swapState = SwapState(sourceID: photoID, sourceCellRect: cellRect, fingerLocation: CGPoint(x: cellRect.midX, y: cellRect.midY), hoveredTargetID: nil)
@@ -822,6 +839,7 @@ final class GestureController {
         phase = .idle
 
         guard let targetID = state.swapState?.hoveredTargetID else {
+            state.debugLog("up: swap no-target")
             withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                 state.swapState?.fingerLocation = CGPoint(x: sourceCellRect.midX, y: sourceCellRect.midY)
             }
