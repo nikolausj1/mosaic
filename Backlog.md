@@ -144,7 +144,13 @@ Everything below is BUILT and sim-verified where the sim allows; these specific 
 7. Auto-framing quality on fresh picks (B20 evidence collection continues).
 8. Export wall-clock < 3s and no dropped frames during gestures (S2/S4) - Instruments if it feels off.
 
-### B23 - First pan attempt sometimes not recognized (OPEN BUG, Phase 2)
+### B23 - RESOLVED 2026-07-17: first pan eaten by a stuck post-pinch latch
+**Root cause (proven by the on-device HUD trace Justin captured):** when both pinch fingers lift simultaneously, SwiftUI skips the accompanying DragGesture's onEnded, so `dragConsumedByPinch` stayed armed and silently ate the ENTIRE next one-finger pan ("drag suppressed (post-pinch)" x N ticks). One dead pan after most pinches; second attempt always worked - exactly the two-pass symptom reported at the S1 gate.
+**Fix:** the latch now remembers WHICH touch sequence the pinch consumed (its startLocation); a drag arriving from any other touch clears the latch and proceeds. Same commit also hard-locks the canvas during export at the GestureController entry points - the visual blocker overlay only claimed taps, so pans during the multi-second save could edit the document after the export snapshot was taken (Justin's canvas-vs-minted-image mismatch).
+**Residual watch:** if a first-pan miss EVER recurs with the HUD showing `down->photo` (not "suppressed"), that's a different bug - reopen with the HUD fingerprint table from the original entry (git history has it).
+**Cleanup still owed:** debug HUD removal once Justin confirms feel on device.
+
+### B23-archive - original hypothesis table (superseded by the resolution above)
 **Symptom (Justin, on device, 2026-07-16):** the first finger-drag to pan a photo does nothing; the second attempt pans. "Feels ok for now" - deferred, not resolved.
 **Instrumentation is already in place:** the prototype renders a gesture-event HUD at the bottom of the screen (EditorState.debugEvents / debugLog). When it recurs, the last lines identify the cause directly:
 - `down->photo … hold->swap … up: swap no-target` -> the 0.35s long-press is stealing deliberate pans (natural grab-settle-move rhythm). Fix space: longer hold, bigger slop, or require selection for swap.

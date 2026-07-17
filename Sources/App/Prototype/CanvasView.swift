@@ -120,8 +120,16 @@ struct CanvasView: View {
         let effPx = effectivePhotoSize(pixelSize: pixelSize, quarterTurns: ref.quarterTurns)
         let effW = effPx.width * displayScale
         let effH = effPx.height * displayScale
-        let innerOffsetX = cellSize.width / 2 - ref.center.x * effW
-        let innerOffsetY = cellSize.height / 2 - ref.center.y * effH
+        // Explicit center placement - no offset/alignment chains. SwiftUI's
+        // placement of oversized children inside a smaller .frame proved
+        // untrustworthy under algebra (the Phase 4 offset form rendered
+        // zoomed off-center crops against the wrong side, with coverage
+        // gaps - caught by the export-fidelity harness). `.position` pins
+        // the image's layout-frame CENTER, rotation spins about that same
+        // center, so the rotated/flipped block of effW x effH is centered
+        // at exactly this point in cell space:
+        let blockCenterX = cellSize.width / 2 + (0.5 - ref.center.x) * effW
+        let blockCenterY = cellSize.height / 2 + (0.5 - ref.center.y) * effH
 
         ZStack(alignment: .topLeading) {
             Image(uiImage: image)
@@ -129,8 +137,7 @@ struct CanvasView: View {
                 .frame(width: frameSize.width, height: frameSize.height)
                 .rotationEffect(.degrees(90 * Double(ref.quarterTurns)))
                 .scaleEffect(x: ref.flipH ? -1 : 1, y: ref.flipV ? -1 : 1)
-                .frame(width: effW, height: effH)
-                .offset(x: innerOffsetX, y: innerOffsetY)
+                .position(x: blockCenterX, y: blockCenterY)
         }
         .frame(width: cellSize.width, height: cellSize.height)
         // Border tray's Radius: canvas must match what export mints

@@ -381,6 +381,29 @@ private struct DebugUIStateModifier: ViewModifier {
             case "photoToolbar":
                 let (cells, _) = solve(root: state.document.root, canvasSize: state.canvasSize, border: state.document.border)
                 state.selection = cells.first?.id
+            case "stressCrops":
+                // Export-fidelity harness: non-default zoom/center/rotation/
+                // flip on every photo, so a canvas screenshot and an -autoSave
+                // export can be compared crop-for-crop (the default document
+                // hides center/zoom bugs - everything sits at 0.5/1.0).
+                var doc = state.document
+                let ids = photoIDs(in: doc.root)
+                let tweaks: [(zoom: Double, center: CGPoint, turns: Int, flipH: Bool)] = [
+                    (1.8, CGPoint(x: 0.35, y: 0.60), 0, false),
+                    (2.5, CGPoint(x: 0.70, y: 0.40), 0, false),
+                    (1.0, CGPoint(x: 0.50, y: 0.50), 1, false),
+                    (1.5, CGPoint(x: 0.30, y: 0.50), 0, true),
+                ]
+                for (i, id) in ids.enumerated() where i < tweaks.count {
+                    guard var photo = doc.photos[id] else { continue }
+                    photo.zoom = tweaks[i].zoom
+                    photo.center = tweaks[i].center
+                    photo.quarterTurns = tweaks[i].turns
+                    photo.flipH = tweaks[i].flipH
+                    photo.isAuto = false
+                    doc.photos[id] = photo
+                }
+                state.document = reclampAll(doc, canvasSize: state.canvasSize)
             case "rotated":
                 // Rendering-math check: rotate the first photo 90 and pan it
                 // off-center so the effective-space offset formula is

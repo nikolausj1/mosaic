@@ -396,6 +396,14 @@ final class GestureController {
     /// beginTouch with a stale startLocation and a translation that includes
     /// the whole pinch era - a visible jump). Cleared when the drag ends.
     private var dragConsumedByPinch = false
+    /// Identity of the drag sequence the pinch consumed: its startLocation.
+    /// A dragChanged arriving with a DIFFERENT startLocation is a brand-new
+    /// touch - never suppress it, even if the latch is still set (SwiftUI
+    /// skips dragEnded when both pinch fingers lift simultaneously, which
+    /// otherwise left the latch armed and ate the next pan - the on-device
+    /// HUD's "drag suppressed (post-pinch)" trace, B23's root cause).
+    private var pinchConsumedDragStart: CGPoint?
+    private var currentDragStartLocation: CGPoint = .zero
 
     init(state: EditorState) {
         self.state = state
@@ -405,13 +413,22 @@ final class GestureController {
 
     func dragChanged(_ value: DragGesture.Value) {
         currentDragTranslation = value.translation
+        currentDragStartLocation = value.startLocation
 
         switch phase {
         case .idle:
             if dragConsumedByPinch {
-                state.debugLog("drag suppressed (post-pinch)")
-                return
+                if let consumed = pinchConsumedDragStart, consumed != value.startLocation {
+                    // New touch sequence - the pinch-era drag is gone; the
+                    // latch was only ever meant for THAT sequence.
+                    dragConsumedByPinch = false
+                    pinchConsumedDragStart = nil
+                } else {
+                    state.debugLog("drag suppressed (post-pinch)")
+                    return
+                }
             }
+            if state.isExporting { return } // canvas locked during export
             state.beginGesture()
             beginTouch(at: value.startLocation)
         case .tracking(let info):
@@ -439,6 +456,7 @@ final class GestureController {
         defer {
             holdToken = nil
             dragConsumedByPinch = false
+            pinchConsumedDragStart = nil
         }
 
         switch phase {
@@ -615,6 +633,7 @@ final class GestureController {
     // MARK: - Pinch (Magnify + simultaneous drag translation)
 
     func magnifyChanged(_ value: MagnifyGesture.Value) {
+        if state.isExporting { return } // canvas locked during export
         state.beginGesture()
         switch phase {
         case .pinch(let info):
@@ -650,6 +669,7 @@ final class GestureController {
     private func beginPinch(value: MagnifyGesture.Value) {
         state.debugLog("pinch begin")
         dragConsumedByPinch = true
+        pinchConsumedDragStart = currentDragStartLocation
         let point = value.startLocation
         let (cells, _) = solve(root: state.document.root, canvasSize: state.canvasSize, border: state.document.border)
         guard let cell = cells.first(where: { $0.rect.contains(point) }), let ref = state.document.photos[cell.id] else {
