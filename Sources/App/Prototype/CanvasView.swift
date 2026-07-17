@@ -105,7 +105,7 @@ struct CanvasView: View {
     /// Shared crop-rendering used both for a cell in place and for the swap
     /// proxy (which just re-renders the same crop at a smaller visual scale).
     @ViewBuilder
-    private func cellContent(ref: PhotoRef, image: UIImage, cellSize: CGSize) -> some View {
+    private func cellContent(ref: PhotoRef, image: UIImage, cellSize: CGSize, cornerRadiusPts: Double = 0) -> some View {
         let pixelSize = CGSize(width: Double(ref.pixelWidth), height: Double(ref.pixelHeight))
         let s0 = fillScale(cellSize: cellSize, photoPixelSize: pixelSize, quarterTurns: ref.quarterTurns)
         let displayScale = s0 * ref.zoom
@@ -133,7 +133,9 @@ struct CanvasView: View {
                 .offset(x: innerOffsetX, y: innerOffsetY)
         }
         .frame(width: cellSize.width, height: cellSize.height)
-        .clipped()
+        // Border tray's Radius: canvas must match what export mints
+        // (CollageRenderer clips each cell with the same rounded rect).
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadiusPts, style: .continuous))
     }
 
     /// Phase 6 (additive only - no gesture/render math touched): a cell
@@ -142,11 +144,17 @@ struct CanvasView: View {
     /// determined the source asset is gone. Tapping either still resolves to
     /// `.photo(id, rect)` in `classifyTouch` (unaffected by whether `image`
     /// is loaded), so selection - and therefore Replace - keeps working.
+    /// BorderStyle.cornerRadius is a fraction of the canvas short edge
+    /// (same rule as inner/outer) - convert once per render.
+    private var cellCornerRadiusPts: Double {
+        state.document.border.cornerRadius * min(state.canvasSize.width, state.canvasSize.height)
+    }
+
     @ViewBuilder
     private func photoCell(_ cell: CellFrame) -> some View {
         if let ref = state.document.photos[cell.id] {
             if let image = state.images[cell.id] {
-                cellContent(ref: ref, image: image, cellSize: cell.rect.size)
+                cellContent(ref: ref, image: image, cellSize: cell.rect.size, cornerRadiusPts: cellCornerRadiusPts)
                     .opacity(state.swapState?.sourceID == cell.id ? 0.85 : 1.0)
                     .offset(x: cell.rect.minX, y: cell.rect.minY)
             } else if state.unavailablePhotoIDs.contains(cell.id) {

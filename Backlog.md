@@ -123,6 +123,27 @@ These could be settled by dumping strings/resources from an Android APK, **which
 **Why not:** re-running on topology or ratio changes makes photos move by themselves, and re-running during a divider drag makes them swim under your finger. The one-shot version slots into the existing `center` field with zero new rules.
 **Revisit signal:** photos that hold multiple subjects are consistently badly framed after a topology change.
 
+### B24 - "Original" ratio chip semantics (Phase 4 judgment call)
+**Shipped:** Original := the FIRST photo's native pixel aspect (document leaf order). The PRD lists the chip without defining it for a multi-photo canvas.
+**Revisit signal:** Justin taps Original expecting something else (e.g. the arrival ratio, or the currently selected photo's aspect).
+
+### B25 - Deferred Phase 4/6 polish (all noted in code)
+- Picker fast-scroll scrubber: system scroll indicators for now; custom scrubber was explicitly allowed to slip to polish.
+- iCloud download progress ring in editor cells: shimmer placeholder covers the visual gap; per-photo progress plumbing deferred.
+- Derived border swatches compute at editor-open and after restore, not on Replace/Remove.
+**Revisit signal:** any of these feels missing in daily use.
+
+### B26 - Device-verification checklist (autonomous run, 2026-07-17)
+Everything below is BUILT and sim-verified where the sim allows; these specific flows need the phone because sim permission dialogs / real assets can't be automated:
+1. Happy-path restore: pick real photos, force-quit mid-edit, relaunch -> exact restore with photos (sim only proved the document/JSON side + unavailable path).
+2. Real save-to-Photos: asset lands in the library, filed under the EARLIEST source capture date (S7) - check in Photos' library (date-sorted), not just Recents.
+3. Share sheet from the save sheet.
+4. Edit last collage round-trip after a real save.
+5. Delete a source photo from Photos, relaunch -> unavailable placeholder + blocked Save + Replace clears it.
+6. Gesture feel on rotated/flipped photos (pan/pinch should feel identical; the coordinate-space semantics changed in Phase 4).
+7. Auto-framing quality on fresh picks (B20 evidence collection continues).
+8. Export wall-clock < 3s and no dropped frames during gestures (S2/S4) - Instruments if it feels off.
+
 ### B23 - First pan attempt sometimes not recognized (OPEN BUG, Phase 2)
 **Symptom (Justin, on device, 2026-07-16):** the first finger-drag to pan a photo does nothing; the second attempt pans. "Feels ok for now" - deferred, not resolved.
 **Instrumentation is already in place:** the prototype renders a gesture-event HUD at the bottom of the screen (EditorState.debugEvents / debugLog). When it recurs, the last lines identify the cause directly:
