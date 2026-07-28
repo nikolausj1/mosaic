@@ -31,6 +31,14 @@ struct EditorView: View {
     /// to ContentView, which dismisses back to the Picker (Phase 6 wires
     /// "last collage" archiving on top of this same hook).
     var onDone: (() -> Void)? = nil
+    /// B32 Phase 0: the arrival sequence plays in a ContentView-owned overlay
+    /// ABOVE this editor while the editor is quietly mounting underneath it.
+    /// The only thing this view needs from it is "am I still hidden?" - see
+    /// `triggerGhostDemoIfNeeded`, which must not start teaching gestures on
+    /// a canvas nobody can see yet (and must not reshape that canvas while
+    /// the sequence is morphing photos onto its cells). Nil on any path that
+    /// never runs the sequence.
+    var magicLayout: MagicLayoutController? = nil
 
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("hasSeenEditor") private var hasSeenEditor: Bool = false
@@ -453,6 +461,15 @@ struct EditorView: View {
         let delayNs: UInt64 = hasOpenTray ? 1_200_000_000 : 800_000_000
 
         ghostDemoTask = Task {
+            // B32 Phase 0: a fresh pick arrives UNDER the Magic Layout
+            // overlay, which is still animating photos onto this canvas's
+            // cells. Wait it out before the teach begins - otherwise the
+            // demo's canvas reshape fights the morph landing on it, and the
+            // caption/fingertip play out where nobody can see them.
+            while magicLayout?.isActive == true {
+                try? await Task.sleep(nanoseconds: 80_000_000)
+                if Task.isCancelled { return }
+            }
             try? await Task.sleep(nanoseconds: delayNs)
             guard !Task.isCancelled, !hasSeenCoachMarks else { return }
             await runGhostGestureDemo()

@@ -65,9 +65,62 @@ final class PickerState {
     var isLoading = false
     var loadingMessage = "Preparing…"
 
+    /// B32 Phase 0: true from the moment the Magic Layout sequence takes over
+    /// the picker-to-editor handoff. The old spinner (`loadingOverlay`) is the
+    /// thing the sequence REPLACES, so it must not also show underneath it -
+    /// but it is still the correct presentation for `.replace` mode, for
+    /// Reduce Motion, and for a pick that bypasses the sequence, hence a flag
+    /// rather than a deletion. Observable (unlike the two caches below) since
+    /// a view body reads it.
+    var isMagicSequenceRunning = false
+
+    /// B32 Phase 0 - the overlay's source geometry. Live global frames of the
+    /// SELECTED grid thumbnails, republished by `PickedThumbFramesKey` on
+    /// every scroll/layout change and parked here by `PickerView` so they
+    /// survive into the confirm handler (by which point the grid may be
+    /// mid-teardown). `@ObservationIgnored` on purpose: nothing renders from
+    /// these, so tracking them would only add spurious invalidations to a
+    /// view that is re-rendered on every selection tap already.
+    @ObservationIgnored private(set) var thumbFrames: [String: CGRect] = [:]
+
+    /// B32 Phase 0 - the overlay's source PIXELS, so the sequence can start
+    /// the instant Next is tapped rather than waiting for
+    /// `loadForEditing`'s full-resolution proxies (which is the whole point:
+    /// the arrive/scan beats run OVER that load, not after it). Capped at the
+    /// current selection (<= 4 images) by `pruneThumbnailCache`, so this
+    /// never becomes a library-sized bitmap cache.
+    @ObservationIgnored private(set) var selectedThumbnails: [String: UIImage] = [:]
+
     /// Set only by the denied-state "Choose Photos" PHPickerViewController
     /// fallback - those results never have a backing PHAsset.
     private var fallbackPicks: [(image: UIImage, pixelSize: CGSize)] = []
+
+    /// The overlay's inputs, in pick order: where each chosen thumbnail sits
+    /// on screen right now and the bitmap already showing there. A selection
+    /// whose frame never got published (scrolled far off screen in a lazy
+    /// grid) is simply omitted - `MagicLayoutController` synthesizes a
+    /// starting square for it rather than refusing to run.
+    func magicSources() -> [MagicSource] {
+        selectedAssetIDs.compactMap { id in
+            guard let rect = thumbFrames[id] else { return nil }
+            return MagicSource(assetID: id, rect: rect, image: selectedThumbnails[id])
+        }
+    }
+
+    func recordThumbFrames(_ frames: [String: CGRect]) {
+        thumbFrames = frames
+    }
+
+    /// Called by `GridThumbnail` whenever a SELECTED cell has a bitmap in
+    /// hand (on load, and again if selection arrives after the load did).
+    func recordSelectedThumbnail(_ assetID: String, image: UIImage) {
+        guard selectedAssetIDs.contains(assetID) else { return }
+        selectedThumbnails[assetID] = image
+    }
+
+    private func pruneThumbnailCache() {
+        selectedThumbnails = selectedThumbnails.filter { selectedAssetIDs.contains($0.key) }
+    }
 
     var authorizationStatus: PHAuthorizationStatus { library.authorizationStatus }
     var isLimited: Bool { authorizationStatus == .limited }
@@ -141,6 +194,9 @@ final class PickerState {
     }
 
     func toggleSelection(_ assetID: String) {
+        // Every `return` below is followed by the same cache prune, so the
+        // B32 thumbnail cache can never outlive the selection it mirrors.
+        defer { pruneThumbnailCache() }
         if let idx = selectedAssetIDs.firstIndex(of: assetID) {
             selectedAssetIDs.remove(at: idx)
             return
@@ -184,7 +240,11 @@ final class PickerState {
     /// into it, solve for cell rects, then auto-frame each photo into its
     /// assigned cell. Template must be chosen BEFORE auto-framing since
     /// auto-framing needs the cell size.
-    func confirmSelection() async -> (Document, [PhotoID: UIImage])? {
+    /// B32 Phase 0: returns a `PickCompletion` rather than the old
+    /// `(Document, images)` pair - the Magic Layout overlay needs the raw
+    /// per-photo face rects, which this flow used to distil into an `ROI` and
+    /// then discard. Everything else about the pipeline is untouched.
+    func confirmSelection() async -> PickCompletion? {
         isLoading = true
         loadingMessage = "Preparing…"
         defer { isLoading = false }
@@ -208,15 +268,23 @@ final class PickerState {
         return await buildDocument(from: loaded)
     }
 
-    /// Auto-selects the `count` newest grid photos and runs the same
-    /// completion flow - the `-autoPick N` launch-arg path for simctl
-    /// screenshot automation.
-    func autoPickAndConfirm(count: Int) async -> (Document, [PhotoID: UIImage])? {
+    /// Auto-selects the `count` newest grid photos - the `-autoPick N`
+    /// launch-arg path for simctl screenshot automation.
+    ///
+    /// SPLIT from the old `autoPickAndConfirm` (B32 Phase 0): the caller now
+    /// runs `confirmSelection()` itself, because the Magic Layout sequence
+    /// has to START before the confirm is awaited (it plays OVER that work,
+    /// not after it) - and because the grid needs a beat between the
+    /// selection landing and the confirm to publish the selected thumbnails'
+    /// frames, which is the overlay's source geometry. See
+    /// `ContentView.applyLaunchArgsIfNeeded`.
+    @discardableResult
+    func autoPickSelect(count: Int) async -> Bool {
         await onAppear()
-        guard assets.count > 0 else { return nil }
+        guard assets.count > 0 else { return false }
         let n = min(count, assets.count)
         selectedAssetIDs = (0..<n).map { assets.object(at: $0).localIdentifier }
-        return await confirmSelection()
+        return true
     }
 
     /// Phase 4 Replace flow: exactly one loaded (image, pixelSize, asset) -
@@ -242,7 +310,24 @@ final class PickerState {
         return nil
     }
 
-    private func buildDocument(from loaded: [(image: UIImage, pixelSize: CGSize, asset: PHAsset?)]) async -> (Document, [PhotoID: UIImage])? {
+    /// Same face thresholds `AutoFrame.swift` applies internally (confidence
+    /// >= 0.5, height >= 8% of the photo's SHORT edge, measured in pixels).
+    /// Restated here rather than shared because that filter is `private` to
+    /// the Engine's `autoFrame` and this worker does not own `Sources/Engine`
+    /// this pass. It matters that the two agree: the boxes the reveal lights
+    /// up must be the same detections the framing decision actually used, or
+    /// the theater is showing something the app didn't do.
+    private static func survivingFaces(_ vision: (faces: [(CGRect, Double)], salient: CGRect?), pixelSize: CGSize) -> [CGRect] {
+        let shortEdge = min(pixelSize.width, pixelSize.height)
+        let minPixelHeight = 0.08 * shortEdge
+        return vision.faces.compactMap { face, confidence in
+            guard confidence >= 0.5 else { return nil }
+            guard face.height * pixelSize.height >= minPixelHeight else { return nil }
+            return face
+        }
+    }
+
+    private func buildDocument(from loaded: [(image: UIImage, pixelSize: CGSize, asset: PHAsset?)]) async -> PickCompletion? {
         loadingMessage = "Framing your photos…"
 
         var idsInOrder: [PhotoID] = []
@@ -275,6 +360,7 @@ final class PickerState {
         let cellRectByID = Dictionary(uniqueKeysWithValues: cells.map { ($0.id, $0.rect) })
 
         var photos: [PhotoID: PhotoRef] = [:]
+        var faceRectsByPhotoID: [PhotoID: [CGRect]] = [:]
         for id in idsInOrder {
             guard let pixelSize = pixelSizes[id] else { continue }
             let cellRect = cellRectByID[id] ?? CGRect(origin: .zero, size: nominalCanvas)
@@ -282,6 +368,18 @@ final class PickerState {
             var roi: ROI?
             if let cgImage = images[id]?.cgImage {
                 let vision = await library.visionInputs(cgImage: cgImage)
+                // B32 Phase 0: keep the raw (thresholded) face rects, which
+                // this flow used to drop on the floor the moment `autoFrame`
+                // had turned them into an ROI. The reveal's box beat needs
+                // the boxes themselves.
+                let kept = Self.survivingFaces(vision, pixelSize: pixelSize)
+                faceRectsByPhotoID[id] = kept
+                #if DEBUG
+                NSLog("MAGIC vision: %dx%d rawFaces=%d kept=%d salient=%@",
+                      Int(pixelSize.width), Int(pixelSize.height),
+                      vision.faces.count, kept.count,
+                      vision.salient == nil ? "no" : "yes")
+                #endif
                 let input = AutoFrameInput(
                     faces: vision.faces.map(\.0),
                     faceConfidences: vision.faces.map(\.1),
@@ -308,7 +406,13 @@ final class PickerState {
 
         var doc = Document(canvasRatio: .square, root: assigned, photos: photos, border: border)
         doc = reclampAll(doc, canvasSize: nominalCanvas)
-        return (doc, images)
+        return PickCompletion(
+            document: doc,
+            images: images,
+            orderedPhotoIDs: idsInOrder,
+            assetIDByPhotoID: assetByID.mapValues(\.localIdentifier),
+            faceRectsByPhotoID: faceRectsByPhotoID
+        )
     }
 }
 
@@ -320,8 +424,15 @@ struct PickerView: View {
     /// state for its Remove Watermark row - owned upstream (ContentView) and
     /// threaded through, same as every other state object in this app.
     var storeService: StoreService
-    /// `.pick` mode's completion: a whole new Document + its images.
-    var onConfirmed: (Document, [PhotoID: UIImage]) -> Void = { _, _ in }
+    /// `.pick` mode's completion: the finished document, its images, and
+    /// (B32 Phase 0) the per-photo face rects the Magic Layout reveal needs.
+    var onConfirmed: (PickCompletion) -> Void = { _ in }
+    /// B32 Phase 0: fired the instant Next is tapped, BEFORE the document
+    /// work starts, handing the host the source geometry+pixels for the
+    /// arrival sequence. Returns true if the host actually started the
+    /// sequence (false under Reduce Motion / `-magicLayoutOff`), which is how
+    /// this view knows whether to keep showing its own spinner.
+    var onPickBegan: ([MagicSource]) -> Bool = { _ in false }
     /// `.replace` mode's completion (Phase 4): the single freshly-loaded
     /// asset, handed to `EditorState.replace(photoID:image:pixelSize:...)`.
     var onReplaceConfirmed: ((UIImage, CGSize, PHAsset?) -> Void)? = nil
@@ -417,13 +528,15 @@ struct PickerView: View {
     init(
         state: PickerState,
         storeService: StoreService,
-        onConfirmed: @escaping (Document, [PhotoID: UIImage]) -> Void = { _, _ in },
-        onReplaceConfirmed: ((UIImage, CGSize, PHAsset?) -> Void)? = nil
+        onConfirmed: @escaping (PickCompletion) -> Void = { _ in },
+        onReplaceConfirmed: ((UIImage, CGSize, PHAsset?) -> Void)? = nil,
+        onPickBegan: @escaping ([MagicSource]) -> Bool = { _ in false }
     ) {
         _state = State(initialValue: state)
         self.storeService = storeService
         self.onConfirmed = onConfirmed
         self.onReplaceConfirmed = onReplaceConfirmed
+        self.onPickBegan = onPickBegan
 
         // Read the "have we ever played this" flag BEFORE marking it -
         // that decides whether THIS appearance animates at all. Mark it
@@ -506,8 +619,19 @@ struct PickerView: View {
                 Task { await confirmAndDeliver() }
             }
         }
+        // B32 Phase 0: the source geometry export. Selected grid cells
+        // publish their global frames up through the ScrollView; this parks
+        // the live values on `PickerState` so they are in hand at confirm
+        // time, when the grid itself is about to be torn down.
+        .onPreferenceChange(PickedThumbFramesKey.self) { frames in
+            state.recordThumbFrames(frames)
+        }
         .overlay {
-            if state.isLoading {
+            // The Magic Layout sequence REPLACES this spinner for the `.pick`
+            // handoff (it plays over exactly the work the spinner used to
+            // hide). This overlay still serves `.replace` mode, Reduce
+            // Motion, and any pick where the sequence declined to start.
+            if state.isLoading && !state.isMagicSequenceRunning {
                 loadingOverlay
             }
         }
@@ -538,11 +662,24 @@ struct PickerView: View {
 
     // MARK: - Splash-to-picker + first-run welcome choreography (Justin, 2026-07-26)
 
+    /// B32 Phase 0: the sequence starts HERE, on the tap - not when the
+    /// document is finished. `onPickBegan` hands the host the picker's own
+    /// geometry and pixels and puts the overlay on screen immediately, so the
+    /// arrive and scan beats are spent covering the `loadForEditing` + Vision
+    /// work that today sits behind a spinner. That overlap is what keeps the
+    /// added wall clock small; starting the sequence after `confirmSelection`
+    /// returned would make every millisecond of it pure addition.
     private func confirmAndDeliver() async {
         switch state.mode {
         case .pick:
-            if let (doc, images) = await state.confirmSelection() {
-                onConfirmed(doc, images)
+            MagicTiming.startPick()
+            if onPickBegan(state.magicSources()) {
+                state.isMagicSequenceRunning = true
+            }
+            if let completion = await state.confirmSelection() {
+                onConfirmed(completion)
+            } else {
+                state.isMagicSequenceRunning = false
             }
         case .replace:
             if let (image, pixelSize, asset) = await state.confirmReplace() {
@@ -1039,7 +1176,8 @@ struct PickerView: View {
                             library: state.library,
                             isSelected: state.isSelected(asset.localIdentifier),
                             selectionOrder: state.selectionOrder(asset.localIdentifier),
-                            pulse: state.pulseNextBadge
+                            pulse: state.pulseNextBadge,
+                            onSelectedImage: { id, image in state.recordSelectedThumbnail(id, image: image) }
                         )
                         .onTapGesture {
                             state.toggleSelection(asset.localIdentifier)
@@ -1147,6 +1285,12 @@ private struct GridThumbnail: View {
     /// (Justin, 2026-07-26). Always non-nil when `isSelected` is true.
     let selectionOrder: Int?
     let pulse: Bool
+    /// B32 Phase 0: hands the loaded thumbnail bitmap up to `PickerState`
+    /// while this cell is selected, so the arrival sequence has something to
+    /// draw the instant Next is tapped (long before `loadForEditing`'s
+    /// full-resolution proxy exists). Reported both when the image lands and
+    /// when selection arrives after it - either order happens.
+    var onSelectedImage: (String, UIImage) -> Void = { _, _ in }
 
     @State private var image: UIImage?
     @State private var isDegraded = true
@@ -1156,6 +1300,23 @@ private struct GridThumbnail: View {
         GeometryReader { geo in
             ZStack {
                 Color.white.opacity(0.05)
+                // B32 Phase 0 - source geometry export. Zero-footprint marker
+                // publishing this cell's GLOBAL frame while it is selected.
+                // Note the ordering rule this project already paid for once
+                // (see `CanvasView.coachMarkAnchorMarkers`): a geometry export
+                // must describe the SIZED child, never a `.position`-wrapped
+                // parent. There is no `.position` anywhere in this cell's
+                // chain and `geo` is sized to exactly the square, so
+                // `geo.frame(in: .global)` is precisely the thumbnail's
+                // on-screen rect - and unlike an `Anchor` token it
+                // re-resolves as the grid scrolls, which matters because
+                // these frames are consumed at confirm time, arbitrarily
+                // later than the tap that selected them.
+                Color.clear
+                    .preference(
+                        key: PickedThumbFramesKey.self,
+                        value: isSelected ? [asset.localIdentifier: geo.frame(in: .global)] : [:]
+                    )
                 if let image {
                     Image(uiImage: image)
                         .resizable()
@@ -1219,7 +1380,14 @@ private struct GridThumbnail: View {
                 requestID = library.requestThumbnail(for: asset, targetSize: CGSize(width: geo.size.width * 3, height: geo.size.width * 3)) { img, degraded in
                     image = img
                     isDegraded = degraded
+                    if let img, isSelected { onSelectedImage(asset.localIdentifier, img) }
                 }
+            }
+            // Selection can land after the bitmap did (the common case: you
+            // scroll, everything loads, then you tap) - report again here so
+            // the B32 cache is populated either way.
+            .onChange(of: isSelected) { _, selected in
+                if selected, let image { onSelectedImage(asset.localIdentifier, image) }
             }
             .onDisappear {
                 if let requestID { library.cancelThumbnailRequest(requestID) }

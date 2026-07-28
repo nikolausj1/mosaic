@@ -87,6 +87,16 @@ struct CanvasView: View {
 
             canvasContent
                 .frame(width: state.canvasSize.width, height: state.canvasSize.height)
+                // B32 Phase 0 - destination geometry export (see
+                // MagicLayout.swift). The canvas is centered in this reader,
+                // so its global rect is derivable exactly, without an anchor:
+                // the reader's own global frame plus the canvas's known size,
+                // centered. Publishing the RECT rather than an
+                // `Anchor<CGRect>` also sidesteps the ordering trap the coach
+                // marks hit below - there is no way for this value to
+                // accidentally describe the `.position` wrapper's full-bleed
+                // frame instead of the canvas.
+                .preference(key: EditorCanvasFrameKey.self, value: canvasGlobalRect(in: geo))
                 .position(x: geo.size.width / 2, y: geo.size.height / 2)
                 .frame(width: geo.size.width, height: geo.size.height)
                 .onAppear {
@@ -101,6 +111,23 @@ struct CanvasView: View {
                     state.containerSize = CGSize(width: max(newValue.width - 56, 0), height: max(newValue.height - 56, 0))
                 }
         }
+    }
+
+    /// The canvas rect in GLOBAL (window) coordinates - the same space
+    /// `PickedThumbFramesKey` publishes the picker's thumbnails in, so the
+    /// Magic Layout overlay can morph between the two without any coordinate
+    /// bookkeeping of its own. Offsetting `solve()`'s cell rects by this
+    /// origin lands them exactly on the cells `canvasContent` draws, which is
+    /// what makes the sequence's final frame identical to the editor's first.
+    private func canvasGlobalRect(in geo: GeometryProxy) -> CGRect {
+        let container = geo.frame(in: .global)
+        let size = state.canvasSize
+        return CGRect(
+            x: container.midX - size.width / 2,
+            y: container.midY - size.height / 2,
+            width: size.width,
+            height: size.height
+        )
     }
 
     // MARK: - Canvas content

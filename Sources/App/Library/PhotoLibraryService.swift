@@ -148,13 +148,42 @@ final class PhotoLibraryService {
         await withCheckedContinuation { continuation in
             let faceRequest = VNDetectFaceRectanglesRequest()
             let saliencyRequest = VNGenerateAttentionBasedSaliencyImageRequest()
-            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
 
             do {
-                try handler.perform([faceRequest, saliencyRequest])
+                try VNImageRequestHandler(cgImage: cgImage, options: [:])
+                    .perform([faceRequest, saliencyRequest])
             } catch {
-                continuation.resume(returning: ([], nil))
-                return
+                // CPU-only retry (added while verifying B32 Phase 0). Vision's
+                // default compute path fails outright on the iOS Simulator -
+                // "Failed to create espresso context", i.e. no Neural Engine
+                // backend - and the ONLY previous handling was to swallow the
+                // throw and return nothing. That is indistinguishable from
+                // "Vision genuinely found no faces", so on the simulator every
+                // photo silently fell back to a plain center/fill crop and
+                // B20's auto-framing appeared to work while doing nothing at
+                // all. Anything judged about framing from a simulator run
+                // before this was judging the fallback.
+                //
+                // This retry only ever runs after the normal path has already
+                // thrown - on device it never engages - so it is strictly
+                // additive: a result where there used to be none. `usesCPUOnly`
+                // is deprecated but is still the only knob that forces the
+                // pure-CPU backend these requests need here.
+                #if DEBUG
+                NSLog("MAGIC vision default path FAILED (%@) - retrying CPU-only", String(describing: error))
+                #endif
+                faceRequest.usesCPUOnly = true
+                saliencyRequest.usesCPUOnly = true
+                do {
+                    try VNImageRequestHandler(cgImage: cgImage, options: [:])
+                        .perform([faceRequest, saliencyRequest])
+                } catch {
+                    #if DEBUG
+                    NSLog("MAGIC vision CPU-only retry FAILED: %@", String(describing: error))
+                    #endif
+                    continuation.resume(returning: ([], nil))
+                    return
+                }
             }
 
             let faces: [(CGRect, Double)] = (faceRequest.results ?? []).map { obs in
