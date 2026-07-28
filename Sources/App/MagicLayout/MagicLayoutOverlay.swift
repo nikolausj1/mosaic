@@ -154,11 +154,22 @@ final class MagicLayoutController {
         /// else dims.
         case arrive
         /// Tied to the real work, visuals capped at ~700ms: a sweep crosses
-        /// the photos and the real face boxes light up as they are found.
+        /// the photos and the real face glows light up as they are found.
         case scan
-        /// ~700ms: the morph - frame AND crop - into the chosen cells.
+        /// ~260ms, and the point of the whole feature: the layout the faces
+        /// chose SNAPS into place - as glowing empty slots on the canvas -
+        /// while every face glow is still burning and flares in unison. The
+        /// eye has to be able to connect "these faces" to "this arrangement",
+        /// and that only happens if the arrangement resolves while they are
+        /// lit, not afterwards.
+        case decide
+        /// ~500ms: the morph - frame AND crop - into those slots, glows
+        /// still lit and still welded to their faces the whole way.
         case assemble
-        /// ~250ms: boxes fade, crossfade onto the editor underneath.
+        /// ~460ms: the handoff. The photo layer crossfades onto the identical
+        /// editor underneath, then the last of the theater (glows, slots,
+        /// scrim) fades out as the editor's own always-on affordances - the
+        /// divider capsules and corner handles - come in behind it.
         case settle
     }
 
@@ -179,19 +190,45 @@ final class MagicLayoutController {
         return 1
     }()
 
-    // Beat timings, in seconds - the spec's Phase 3 numbers, used verbatim
-    // for Phase 0 so the judgment is about the same choreography that ships.
+    // Beat timings, in seconds. Phase 0 used the spec's Phase 3 numbers
+    // verbatim and measured ~1.4s of added wall clock against the spinner.
+    // The decision beat below is NEW time, so it is paid for out of the
+    // beats either side of it rather than added on top: the scan floor comes
+    // down (the glows now have the decide beat to breathe into, so they no
+    // longer need a long scan to register), the assemble comes down to the
+    // 450-500ms the Phase 0 build log already identified as a lever, and the
+    // settle's own crossfade starts while the last few frames of the morph
+    // are still running (see `assembleHold`).
     private static let arriveDuration = 0.25
-    /// Floor on the scan beat: below this the box reveal is a subliminal
+    /// Floor on the scan beat: below this the glow reveal is a subliminal
     /// flicker rather than a beat. Only ever costs time when the document was
     /// ready almost instantly.
-    private static let scanFloor = 0.38
+    private static let scanFloor = 0.30
     /// The spec's cap on the scan VISUALS. The beat itself can run longer
     /// than this when the work genuinely takes longer (the sweep just keeps
     /// going) - what's capped is how long we'd ever wait on our own account.
     private static let scanCap = 0.70
-    private static let assembleDuration = 0.70
-    private static let settleDuration = 0.25
+    /// Dead time held for the decision beat. The flare it starts resolves
+    /// over ~220ms, i.e. into the first frames of the assemble - the beat
+    /// hands off mid-gesture rather than coming to a full stop first.
+    private static let decideDuration = 0.26
+    private static let assembleDuration = 0.50
+    /// How long the sequence actually WAITS on the morph before starting the
+    /// settle. Deliberately shorter than the morph itself: at 88% of this
+    /// timing curve the photos are within a pixel or two of the destination
+    /// the editor underneath is already drawing them at, so beginning the
+    /// crossfade there is invisible and buys back 60ms.
+    private static let assembleHold = 0.44
+    /// Settle sub-beats, all measured from the start of the settle:
+    /// photo-layer crossfade (0 -> 0.24), glow/slot burn-down (0.08 -> 0.34),
+    /// editor affordances arriving (0.22 -> 0.50). The stagger is the point:
+    /// the theater is visibly LEAVING as the controls visibly ARRIVE, so the
+    /// end of the sequence reads as a handoff rather than a cut.
+    private static let settleDuration = 0.46
+    private static let glowOutDelay = 0.08
+    private static let glowOutDuration = 0.26
+    private static let chromeInDelay = 0.22
+    private static let chromeInDuration = 0.28
 
     private(set) var beat: Beat = .idle
     var isActive: Bool { beat != .idle }
@@ -204,14 +241,49 @@ final class MagicLayoutController {
     /// swapped out for the editor UNDERNEATH this overlay partway through the
     /// scan beat, and a light scrim would show that swap happening.
     private(set) var scrim: Double = 0
+    /// Opacity of the PHOTO layer only (and, with `scrim`, the thing the
+    /// settle crossfades). Split from the theater layers below so the glows
+    /// and slots can outlive it: once the morph is complete the editor
+    /// underneath is drawing pixel-identical photos, so fading these out
+    /// leaves the energy burning over the LIVE editor for a beat. That is
+    /// what makes the handoff legible instead of a cut to black chrome.
     private(set) var overlayOpacity: Double = 0
     /// 0...1 sweep position for the scan beat's travelling band.
     private(set) var sweep: Double = 0
-    /// How many photos have had their boxes lit so far (staggered reveal).
-    private(set) var revealedBoxes = 0
+    /// How many photos have had their glows lit so far (staggered reveal).
+    private(set) var revealedGlows = 0
     /// False whenever detection is too weak to be worth advertising - see
-    /// `shouldRevealBoxes`. Never advertise a miss.
-    private(set) var boxesEnabled = false
+    /// `shouldRevealGlows`. Never advertise a miss.
+    private(set) var glowsEnabled = false
+    /// How many genuinely-detected faces were withheld because the chosen
+    /// framing cuts them (see `facesSurvivingFinalCrop`). Reported only -
+    /// nothing renders from it - but it is the number that says whether the
+    /// "never glow a face the layout clips" rule is doing any work on a real
+    /// camera roll, which is Phase 4's question.
+    private(set) var clippedFaceCount = 0
+
+    /// Master strength of every face glow. 0 unlit, ~1 burning, ~2.1 at the
+    /// decision flare. Multiplies both the bloom's opacity and its radius, so
+    /// a pulse reads as the halo swelling rather than just brightening.
+    private(set) var glowStrength: Double = 0
+    /// 0...1: the chosen layout's empty slots snapping into place at the
+    /// decision. Drives their opacity AND a slight scale overshoot.
+    private(set) var slotReveal: Double = 0
+    /// A single accent wash across the whole stage at the instant of the
+    /// decision - the "click" of the layout landing.
+    private(set) var decideFlash: Double = 0
+
+    /// True from the moment the sequence starts until the handoff beat -
+    /// read by `CanvasView` (via `EditorView`), which holds its always-on
+    /// divider capsules, corner handles and brackets back while the theater
+    /// is playing so they can ARRIVE at the end instead of having been there
+    /// all along under the scrim. Flipped inside `withAnimation`, so the
+    /// affordances fade and scale in for free.
+    ///
+    /// Every exit path (natural finish, skip, skip-before-ready) runs through
+    /// `finish()`, which clears this - the editor must never be left without
+    /// its controls.
+    private(set) var suppressEditorChrome = false
 
     private(set) var photos: [MagicPhotoPlan] = []
     /// True once the user has touched the overlay: the sequence is abandoned
@@ -222,10 +294,29 @@ final class MagicLayoutController {
     /// on yet. Falls back to exactly today's spinner until there is.
     var showsFallbackSpinner: Bool { didSkip && completion == nil }
 
+    /// True once every plan's `destRect` is a REAL cell rect (the document
+    /// landed and the editor published its canvas). Until then a plan's
+    /// destination is just its own source square, and anything that draws the
+    /// "chosen layout" would be drawing the picker grid instead.
+    var hasResolvedDestinations: Bool {
+        completion != nil && canvasRect.width > 0 && canvasRect.height > 0 && !photos.isEmpty
+    }
+
+    /// The editor canvas rect, in the same global space as every plan rect -
+    /// the frame the chosen layout's slots live in.
+    var destinationBounds: CGRect? {
+        guard hasResolvedDestinations else { return nil }
+        return canvasRect
+    }
+
     private var sources: [MagicSource] = []
     private var completion: PickCompletion?
     private var canvasRect: CGRect = .zero
     private var task: Task<Void, Never>?
+    /// Prepared at `begin` so the decision beat's tap lands on the same frame
+    /// as the flare rather than a warm-up later (same reason `Haptics` keeps
+    /// its generators prepared).
+    private let decisionHaptic = UIImpactFeedbackGenerator(style: .soft)
 
     /// Reduce Motion cuts straight through (spec: "Reduce Motion cuts
     /// straight through", matching the ghost demo's own handling): the caller
@@ -269,13 +360,18 @@ final class MagicLayoutController {
         canvasRect = .zero
         photos = []
         didSkip = false
-        revealedBoxes = 0
-        boxesEnabled = false
+        revealedGlows = 0
+        glowsEnabled = false
         morphProgress = 0
         sweep = 0
         scrim = 0
         overlayOpacity = 0
+        glowStrength = 0
+        slotReveal = 0
+        decideFlash = 0
+        suppressEditorChrome = true
         beat = .arrive
+        decisionHaptic.prepare()
         seedPlansFromSources()
 
         task = Task { await run() }
@@ -367,9 +463,27 @@ final class MagicLayoutController {
         beat = .idle
         overlayOpacity = 0
         scrim = 0
+        glowStrength = 0
+        slotReveal = 0
+        decideFlash = 0
         photos = []
         sources = []
+        // Terminal handoff, non-negotiable: ALL theater is gone by here, and
+        // the editor's own affordances are on their way in. On the natural
+        // path this is a no-op (the settle beat already released them, on a
+        // longer curve); on a skip it is the thing that guarantees the user
+        // is never left looking at a canvas with no controls on it.
+        revealEditorChrome(duration: 0.18)
         MagicTiming.mark("overlay done (editor visible)")
+    }
+
+    /// Idempotent - the settle beat calls it early and on its own timing;
+    /// `finish()` calls it again as the backstop.
+    private func revealEditorChrome(duration: Double) {
+        guard suppressEditorChrome else { return }
+        withAnimation(.easeOut(duration: Self.scaled(duration))) {
+            suppressEditorChrome = false
+        }
     }
 
     // MARK: - The sequence
@@ -408,14 +522,15 @@ final class MagicLayoutController {
         }
         guard !Task.isCancelled else { return }
 
-        // Real boxes on real detections, staggered so they read as "found,
+        // Real glows on real detections, staggered so they read as "found,
         // then found, then found" rather than appearing as one block. Skipped
         // wholesale when detection is weak (never advertise a miss).
-        if boxesEnabled {
+        if glowsEnabled {
+            withAnimation(.easeOut(duration: Self.scaled(0.22))) { glowStrength = 1 }
             let stagger = min(0.09, Self.scanCap / Double(max(photos.count, 1)) / 2)
             for _ in photos.indices {
                 guard !Task.isCancelled else { return }
-                withAnimation(.easeOut(duration: Self.scaled(0.18))) { revealedBoxes += 1 }
+                withAnimation(.easeOut(duration: Self.scaled(0.18))) { revealedGlows += 1 }
                 await sleep(stagger)
             }
         }
@@ -438,26 +553,80 @@ final class MagicLayoutController {
         rebuildPlans()
         guard !Task.isCancelled else { return }
 
-        // BEAT 3 - ASSEMBLE. Frame AND crop, together (see `MagicPhotoPlan`).
-        // A decelerating curve with no overshoot: a spring's overshoot would
-        // push the interpolated zoom past its clamped destination for a few
-        // frames, which can briefly expose a cell edge.
+        // BEAT 3 - DECIDE. The whole reason the feature exists: this is the
+        // moment the layout is SHOWN to be a consequence of the faces, and
+        // the only way an eye can read cause and effect is if the effect
+        // lands while the cause is still visibly lit. So, in one beat and
+        // with nothing else moving: the sweep stops, every face glow flares
+        // in unison, a wash crosses the stage, and the chosen layout snaps in
+        // as a set of empty glowing slots on the canvas. Nothing flies yet -
+        // the arrangement exists before the photos move into it, which is
+        // exactly the order the algorithm did it in.
+        beat = .decide
+        withAnimation(.easeOut(duration: Self.scaled(0.10))) {
+            sweep = 0                       // kill the repeatForever
+            if glowsEnabled { glowStrength = 2.1 }
+            decideFlash = 1
+        }
+        // A spring here, unlike everywhere else in this sequence: the slots
+        // are the one element that should read as SNAPPING rather than
+        // easing. Slight overshoot, quickly damped.
+        withAnimation(.spring(response: 0.30, dampingFraction: 0.62)) {
+            slotReveal = 1
+        }
+        // One soft tap on the same frame as the flare. The decision is the
+        // only moment in the sequence the app is claiming to have DONE
+        // something, and a single haptic is the cheapest way to make a
+        // visual beat feel caused rather than scheduled.
+        decisionHaptic.impactOccurred(intensity: 0.9)
+        await sleep(0.10)
+        guard !Task.isCancelled else { return }
+        withAnimation(.easeOut(duration: Self.scaled(0.22))) {
+            if glowsEnabled { glowStrength = 1.15 }
+            decideFlash = 0
+        }
+        await sleep(Self.decideDuration - 0.10)
+        guard !Task.isCancelled else { return }
+
+        // BEAT 4 - ASSEMBLE. Frame AND crop, together (see `MagicPhotoPlan`),
+        // into the slots the previous beat just laid down. A decelerating
+        // curve with no overshoot: a spring's overshoot would push the
+        // interpolated zoom past its clamped destination for a few frames,
+        // which can briefly expose a cell edge.
+        //
+        // The glows stay lit for the entire flight (Phase 0 wiped them over
+        // the first 40% of the morph). Keeping them welded to their faces all
+        // the way into the cell is what carries the causal claim through the
+        // motion instead of dropping it the moment the photos start moving.
         beat = .assemble
         withAnimation(.timingCurve(0.22, 0.68, 0.16, 1, duration: Self.scaled(Self.assembleDuration))) {
             morphProgress = 1
         }
-        await sleep(Self.assembleDuration)
+        await sleep(Self.assembleHold)
         guard !Task.isCancelled else { return }
 
-        // BEAT 4 - SETTLE. The photos are now sitting exactly on the editor's
-        // own cells, so lifting the scrim and fading this layer out reveals
-        // an identical composition with its chrome resolving in.
+        // BEAT 5 - SETTLE / HANDOFF. Three staggered sub-beats, in this
+        // order, because the order IS the message: the composition becomes
+        // real (the overlay's photos dissolve into the editor's identical
+        // ones), the energy burns down, and the controls arrive. By the last
+        // frame there is no glow, no slot, no sweep, no scrim and no dimming
+        // anywhere - if any of it lingered, the user would still be waiting
+        // for permission to touch the thing.
         beat = .settle
-        withAnimation(.easeInOut(duration: Self.scaled(Self.settleDuration))) {
+        withAnimation(.easeInOut(duration: Self.scaled(0.24))) {
             overlayOpacity = 0
             scrim = 0
         }
-        await sleep(Self.settleDuration)
+        await sleep(Self.glowOutDelay)
+        guard !Task.isCancelled else { return }
+        withAnimation(.easeIn(duration: Self.scaled(Self.glowOutDuration))) {
+            glowStrength = 0
+            slotReveal = 0
+        }
+        await sleep(Self.chromeInDelay - Self.glowOutDelay)
+        guard !Task.isCancelled else { return }
+        revealEditorChrome(duration: Self.chromeInDuration)
+        await sleep(Self.settleDuration - Self.chromeInDelay)
         guard !Task.isCancelled else { return }
         finish()
     }
@@ -502,6 +671,7 @@ final class MagicLayoutController {
         // the lazy grid never published their frames.
         var remainingSources = sources
         var plans: [MagicPhotoPlan] = []
+        clippedFaceCount = 0
         let ids = completion.orderedPhotoIDs
         for (index, id) in ids.enumerated() {
             guard let ref = doc.photos[id], let image = completion.images[id] else { continue }
@@ -517,6 +687,20 @@ final class MagicLayoutController {
             let pixelSize = CGSize(width: Double(ref.pixelWidth), height: Double(ref.pixelHeight))
             let dest = cellRectByID[id]
             let sourceRect = source?.rect ?? Self.syntheticSourceRect(index: index, count: ids.count, around: dest ?? canvasRect)
+            let destZoom = dest == nil ? 1.0 : ref.zoom
+            let destCenter = dest == nil ? CGPoint(x: 0.5, y: 0.5) : ref.center
+
+            let detected = completion.faceRectsByPhotoID[id] ?? []
+            let survivors = dest.map {
+                Self.facesSurvivingFinalCrop(
+                    faces: detected,
+                    pixelSize: pixelSize,
+                    cellSize: $0.size,
+                    zoom: destZoom,
+                    center: destCenter
+                )
+            } ?? detected
+            clippedFaceCount += detected.count - survivors.count
 
             plans.append(MagicPhotoPlan(
                 id: id,
@@ -524,28 +708,73 @@ final class MagicLayoutController {
                 pixelSize: pixelSize,
                 sourceRect: sourceRect,
                 destRect: dest ?? sourceRect,
-                destZoom: dest == nil ? 1.0 : ref.zoom,
-                destCenter: dest == nil ? CGPoint(x: 0.5, y: 0.5) : ref.center,
-                faces: completion.faceRectsByPhotoID[id] ?? []
+                destZoom: destZoom,
+                destCenter: destCenter,
+                faces: survivors
             ))
         }
 
         photos = plans
-        boxesEnabled = Self.shouldRevealBoxes(plans)
+        glowsEnabled = Self.shouldRevealGlows(plans)
         #if DEBUG
-        NSLog("MAGIC plans: %d photos, faces=%@, boxes=%@, canvas=%@",
+        NSLog("MAGIC plans: %d photos, glowedFaces=%@, clippedFacesDropped=%d, glows=%@, canvas=%@",
               plans.count, plans.map { "\($0.faces.count)" }.joined(separator: ","),
-              boxesEnabled ? "on" : "off (degraded)", NSCoder.string(for: canvasRect))
+              clippedFaceCount,
+              glowsEnabled ? "on" : "off (degraded)", NSCoder.string(for: canvasRect))
         #endif
     }
 
+    /// Never glow a face the final framing cuts (2026-07-28). A halo drawn
+    /// around something the very next beat crops out of the collage is the
+    /// app pointing at its own miss - worse than saying nothing, because it
+    /// proves the app SAW the face and dropped it anyway.
+    ///
+    /// The test is the crop the photo genuinely lands in, not an estimate:
+    /// `halfVisible` is the same Engine function `autoFrame`'s own clamp uses,
+    /// fed the destination cell's size and the `(zoom, center)` the document
+    /// actually carries, which yields the visible window in normalized photo
+    /// space. A face is kept only if at least 98% of its AREA falls inside
+    /// that window. Area, not containment, because a strict "fully contained"
+    /// test would drop a face over a sub-pixel sliver at a cell edge, and the
+    /// 2% slack is far below what an eye reads as a cut face; anything more
+    /// obviously clipped than that fails it comfortably.
+    ///
+    /// Fresh picks are always `quarterTurns == 0` (rotation is an editor
+    /// action that cannot have happened yet), so photo space and the
+    /// document's effective displayed space are the same space here.
+    private static func facesSurvivingFinalCrop(
+        faces: [CGRect],
+        pixelSize: CGSize,
+        cellSize: CGSize,
+        zoom: Double,
+        center: CGPoint
+    ) -> [CGRect] {
+        guard cellSize.width > 0, cellSize.height > 0, !faces.isEmpty else { return faces }
+        let half = halfVisible(zoom: zoom, photoPixelSize: pixelSize, cellSize: cellSize)
+        let visible = CGRect(
+            x: center.x - half.hx,
+            y: center.y - half.hy,
+            width: 2 * half.hx,
+            height: 2 * half.hy
+        )
+        return faces.filter { face in
+            let faceArea = Double(face.width * face.height)
+            guard faceArea > 0 else { return false }
+            let overlap = face.intersection(visible)
+            guard !overlap.isNull else { return false }
+            return Double(overlap.width * overlap.height) >= 0.98 * faceArea
+        }
+    }
+
     /// Degradation rule (spec): "if detection is weak or finds fewer faces
-    /// than expected, skip the box-reveal beat and just assemble." Weak here
+    /// than expected, skip the reveal beat and just assemble." Weak here
     /// means fewer than half the photos produced a face that survived the
-    /// framing thresholds - one lucky hit across four landscapes is not a
-    /// face-detection story worth telling, and a set with no faces at all
-    /// (the landscape case that must keep working) skips silently.
-    private static func shouldRevealBoxes(_ plans: [MagicPhotoPlan]) -> Bool {
+    /// framing thresholds AND the final crop - one lucky hit across four
+    /// landscapes is not a face-detection story worth telling, and a set with
+    /// no faces at all (the landscape case that must keep working) skips
+    /// silently. Evaluated AFTER the clipped-face filter above deliberately:
+    /// a set whose faces mostly got cropped away has no story either.
+    private static func shouldRevealGlows(_ plans: [MagicPhotoPlan]) -> Bool {
         guard !plans.isEmpty else { return false }
         let withFaces = plans.filter { !$0.faces.isEmpty }.count
         return withFaces * 2 >= plans.count
@@ -624,22 +853,38 @@ struct MagicLayoutOverlay: View {
                     ProgressView()
                         .tint(.white)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .opacity(controller.overlayOpacity)
                 } else {
+                    // The layout, before the photos are in it. Drawn UNDER
+                    // the flying photos so each one lands on top of its own
+                    // slot, leaving only the slot's outer bloom showing round
+                    // the edges - the composition stays lit until the handoff
+                    // rather than going dead the instant it fills up.
+                    layoutSlots(originFix: originFix)
+
                     ForEach(controller.photos) { plan in
                         MorphingPhotoView(
                             progress: controller.morphProgress,
                             plan: plan,
                             originFix: originFix,
-                            boxOpacity: boxOpacity(for: plan)
+                            photoOpacity: controller.overlayOpacity,
+                            glowStrength: glowStrength(for: plan)
                         )
                     }
                     if controller.beat == .scan {
                         sweepBand(in: proxy.size)
+                            .opacity(controller.overlayOpacity)
+                    }
+                    if controller.decideFlash > 0 {
+                        Color.mosaicAccent
+                            .opacity(0.13 * controller.decideFlash)
+                            .blendMode(.plusLighter)
+                            .ignoresSafeArea()
+                            .allowsHitTesting(false)
                     }
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
-            .opacity(controller.overlayOpacity)
             // Any touch anywhere skips (spec: "any touch skips instantly to
             // the finished editor"). A zero-distance drag catches a touch
             // DOWN rather than waiting for a completed tap, so a press-and-
@@ -651,14 +896,65 @@ struct MagicLayoutOverlay: View {
         .ignoresSafeArea()
     }
 
-    /// Boxes fade in on the staggered reveal, then wipe out over the first
-    /// ~40% of the assemble morph - derived from `morphProgress` rather than
-    /// animated separately so they never lag the photo they're drawn on.
-    private func boxOpacity(for plan: MagicPhotoPlan) -> Double {
-        guard controller.boxesEnabled, !plan.faces.isEmpty else { return 0 }
+    /// A photo's glow strength: 0 until its turn in the staggered reveal
+    /// arrives, then the controller's master `glowStrength` - which stays lit
+    /// through the decision flare AND the entire flight, and only burns down
+    /// at the handoff. (Phase 0 wiped the boxes over the first 40% of the
+    /// morph, which dropped the causal claim exactly when the motion was
+    /// making it.)
+    private func glowStrength(for plan: MagicPhotoPlan) -> Double {
+        guard controller.glowsEnabled, !plan.faces.isEmpty else { return 0 }
         guard let index = controller.photos.firstIndex(where: { $0.id == plan.id }) else { return 0 }
-        guard index < controller.revealedBoxes else { return 0 }
-        return max(0, 1 - controller.morphProgress * 2.5)
+        guard index < controller.revealedGlows else { return 0 }
+        return controller.glowStrength
+    }
+
+    /// The decision made visible: the chosen template's cells, drawn as empty
+    /// glowing slots, snapping in while the face glows flare and BEFORE any
+    /// photo moves. Only ever drawn once real destination geometry exists (a
+    /// missing canvas rect degrades every destRect to its source rect, and
+    /// slots on the picker's own thumbnail squares would assert a layout that
+    /// isn't there).
+    @ViewBuilder
+    private func layoutSlots(originFix: CGPoint) -> some View {
+        if controller.slotReveal > 0, controller.hasResolvedDestinations,
+           let canvas = controller.destinationBounds {
+            let t = controller.slotReveal
+            ZStack {
+                ForEach(controller.photos) { plan in
+                    // Slot rects in CANVAS-local space, so the snap below
+                    // scales the arrangement about the canvas's own center
+                    // rather than the screen's.
+                    let rect = plan.destRect.offsetBy(dx: -canvas.minX, dy: -canvas.minY)
+                    ZStack {
+                        // Outer bloom - the part that still shows around the
+                        // photo once it has landed on the slot.
+                        Rectangle()
+                            .strokeBorder(Color.mosaicAccent.opacity(0.55), lineWidth: 3)
+                            .blur(radius: 7)
+                        Rectangle()
+                            .strokeBorder(Color.mosaicAccent.opacity(0.9), lineWidth: 1)
+                            .blur(radius: 0.5)
+                        // A faint fill so an EMPTY slot reads as a place a
+                        // photo is about to go, not as a wireframe.
+                        Rectangle()
+                            .fill(Color.mosaicAccent.opacity(0.06 * (1 - controller.morphProgress)))
+                    }
+                    .frame(width: rect.width, height: rect.height)
+                    .position(x: rect.midX, y: rect.midY)
+                }
+            }
+            .frame(width: canvas.width, height: canvas.height)
+            .compositingGroup()
+            .blendMode(.plusLighter)
+            // Snap: the whole arrangement lands as one object, scaling from
+            // just under full size. `slotReveal` is spring-driven, so this
+            // overshoots a touch and settles.
+            .scaleEffect(0.965 + 0.035 * t)
+            .opacity(min(1, t))
+            .position(x: canvas.midX - originFix.x, y: canvas.midY - originFix.y)
+            .allowsHitTesting(false)
+        }
     }
 
     /// The scan beat's travelling band - a soft accent-tinted sweep crossing
@@ -700,11 +996,28 @@ private struct MorphingPhotoView: View, Animatable {
     var progress: Double
     let plan: MagicPhotoPlan
     let originFix: CGPoint
-    let boxOpacity: Double
+    /// The photo pixels' own opacity. Separate from the glow's so the settle
+    /// can dissolve the photo into the editor's identical one underneath
+    /// while the glow keeps burning over the live result for a beat.
+    var photoOpacity: Double
+    /// 0 unlit, ~1 burning, ~2.1 at the decision flare.
+    var glowStrength: Double
 
-    var animatableData: Double {
-        get { progress }
-        set { progress = newValue }
+    /// All THREE animated scalars ride in `animatableData`, not just the
+    /// morph. A custom `Animatable` view interpolates only what it declares
+    /// here; anything else a `withAnimation` touches is applied to this view
+    /// as a step change on the next frame. Phase 0 got away with one scalar
+    /// because the box opacity was derived from `progress` and the layer
+    /// opacity was applied by a wrapper OUTSIDE this view - the glow burn-down
+    /// and the photo-layer crossfade now happen INSIDE it, so leaving them
+    /// out would make both of them pop instead of fade.
+    var animatableData: AnimatablePair<AnimatablePair<Double, Double>, Double> {
+        get { AnimatablePair(AnimatablePair(progress, glowStrength), photoOpacity) }
+        set {
+            progress = newValue.first.first
+            glowStrength = newValue.first.second
+            photoOpacity = newValue.second
+        }
     }
 
     var body: some View {
@@ -732,13 +1045,13 @@ private struct MorphingPhotoView: View, Animatable {
                 .resizable()
                 .frame(width: frameW, height: frameH)
                 .position(x: blockCenterX, y: blockCenterY)
+                .opacity(photoOpacity)
 
-            if boxOpacity > 0 {
-                faceBoxes(
+            if glowStrength > 0 {
+                faceGlows(
                     imageOrigin: CGPoint(x: blockCenterX - frameW / 2, y: blockCenterY - frameH / 2),
                     frameSize: CGSize(width: frameW, height: frameH)
                 )
-                .opacity(boxOpacity)
             }
         }
         .frame(width: rect.width, height: rect.height)
@@ -749,20 +1062,52 @@ private struct MorphingPhotoView: View, Animatable {
 
     /// Real Vision rects, in the photo's own normalized top-left space,
     /// projected through the SAME display transform as the pixels they sit
-    /// on - so a box stays welded to its face while the photo pans and zooms.
-    private func faceBoxes(imageOrigin: CGPoint, frameSize: CGSize) -> some View {
-        ForEach(Array(plan.faces.enumerated()), id: \.offset) { _, face in
+    /// on - so a glow stays welded to its face while the photo pans, zooms
+    /// and flies. (That projection is Phase 0's and is deliberately
+    /// untouched; only what gets DRAWN at those rects changed.)
+    ///
+    /// Drawn as a bloom rather than a stroke (Justin, 2026-07-28: "a glowing
+    /// square around each detected face to show the magic ... it should read
+    /// as energy, not as a debug overlay"). Three coincident layers, all
+    /// `plusLighter` so they add into light rather than paint over the photo:
+    /// a wide soft halo, a tighter one, and a thin bright edge that keeps the
+    /// SQUARE legible - lose that and the bloom stops reading as "the app
+    /// drew a box around this face" and starts reading as lens flare.
+    ///
+    /// Both the opacity and the blur radius scale with `glowStrength`, which
+    /// is what makes the decision beat's flare read as the halo SWELLING
+    /// rather than merely brightening.
+    private func faceGlows(imageOrigin: CGPoint, frameSize: CGSize) -> some View {
+        let strength = min(glowStrength, 2.2)
+        let bloom = min(1.0, strength)          // opacity ramp, saturates at 1
+        let flare = max(0, strength - 1)        // extra energy above "lit"
+        return ForEach(Array(plan.faces.enumerated()), id: \.offset) { _, face in
             let box = CGRect(
                 x: imageOrigin.x + face.minX * frameSize.width,
                 y: imageOrigin.y + face.minY * frameSize.height,
                 width: face.width * frameSize.width,
                 height: face.height * frameSize.height
             )
-            RoundedRectangle(cornerRadius: 3, style: .continuous)
-                .strokeBorder(Color.mosaicAccent, lineWidth: 2)
-                .shadow(color: .black.opacity(0.5), radius: 2)
-                .frame(width: box.width, height: box.height)
-                .position(x: box.midX, y: box.midY)
+            let corner = min(box.width, box.height) * 0.16
+            ZStack {
+                RoundedRectangle(cornerRadius: corner + 4, style: .continuous)
+                    .strokeBorder(Color.mosaicAccent, lineWidth: 6 + 5 * flare)
+                    .blur(radius: 9 + 7 * flare)
+                    .opacity(0.42 * bloom + 0.30 * flare)
+                    .scaleEffect(1 + 0.06 * flare)
+                RoundedRectangle(cornerRadius: corner + 2, style: .continuous)
+                    .strokeBorder(Color.mosaicAccent, lineWidth: 3)
+                    .blur(radius: 3.5)
+                    .opacity(0.75 * bloom + 0.25 * flare)
+                RoundedRectangle(cornerRadius: corner, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.85), lineWidth: 1)
+                    .blur(radius: 0.4)
+                    .opacity(0.55 * bloom + 0.45 * flare)
+            }
+            .compositingGroup()
+            .blendMode(.plusLighter)
+            .frame(width: box.width, height: box.height)
+            .position(x: box.midX, y: box.midY)
         }
     }
 

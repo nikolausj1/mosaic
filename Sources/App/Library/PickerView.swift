@@ -321,22 +321,34 @@ final class PickerState {
         return nil
     }
 
-    /// Same face thresholds `AutoFrame.swift` applies internally (confidence
-    /// >= 0.5, height >= 8% of the photo's SHORT edge, measured in pixels).
-    /// Restated here rather than shared because that filter is `private` to
-    /// the Engine's `autoFrame` and this worker does not own `Sources/Engine`
-    /// this pass. It matters that the two agree: the boxes the reveal lights
-    /// up must be the same detections the framing decision actually used, or
-    /// the theater is showing something the app didn't do.
+    /// The faces the framing decision actually used: the Engine's OWN
+    /// threshold filter (confidence >= 0.5, height >= 8% of the photo's short
+    /// edge), called directly rather than restated here.
+    ///
+    /// Phase 0 had a hand-copied duplicate of this, with a comment explaining
+    /// that the Engine's filter was `private` at the time. Phase 1 made
+    /// `thresholdedFaces` non-private precisely so `mustKeepRegion` could
+    /// reuse it, so the copy is now both unnecessary and a hazard - the boxes
+    /// the reveal lights up must be the same detections `autoFrame` and
+    /// `mustKeepRegion` kept, and one shared function is the only way that
+    /// stays true as the thresholds move in Phase 4.
     private static func survivingFaces(_ vision: (faces: [(CGRect, Double)], salient: CGRect?), pixelSize: CGSize) -> [CGRect] {
-        let shortEdge = min(pixelSize.width, pixelSize.height)
-        let minPixelHeight = 0.08 * shortEdge
-        return vision.faces.compactMap { face, confidence in
-            guard confidence >= 0.5 else { return nil }
-            guard face.height * pixelSize.height >= minPixelHeight else { return nil }
-            return face
-        }
+        thresholdedFaces(
+            faces: vision.faces.map(\.0),
+            faceConfidences: vision.faces.map(\.1),
+            photoPixelSize: pixelSize
+        )
     }
+
+    /// See the call site in `buildDocument`. DEBUG-only, like every other
+    /// launch arg in this app; always false in Release.
+    private static let isFaceAwareLayoutDisabled: Bool = {
+        #if DEBUG
+        return ProcessInfo.processInfo.arguments.contains("-faceAwareLayoutOff")
+        #else
+        return false
+        #endif
+    }()
 
     private func buildDocument(from loaded: [(image: UIImage, pixelSize: CGSize, asset: PHAsset?)]) async -> PickCompletion? {
         loadingMessage = "Framing your photos…"
@@ -354,11 +366,6 @@ final class PickerState {
             if let asset = entry.asset { assetByID[id] = asset }
         }
 
-        let orientations = idsInOrder.map { pixelSizes[$0] ?? CGSize(width: 1, height: 1) }
-        let defaultIndex = defaultTemplateIndex(orientations: orientations)
-        let candidateTemplates = templates(for: idsInOrder)
-        let chosenTemplate = candidateTemplates[min(defaultIndex, candidateTemplates.count - 1)]
-
         // A fresh collage starts with a genuinely zero border (Justin,
         // 2026-07-26): photos arrive touching, matching the Border tray's
         // slider at 0. Zero here (not stripped later) so content-fit and
@@ -366,31 +373,119 @@ final class PickerState {
         let border = BorderStyle(inner: 0, outer: 0, linked: true, cornerRadius: 0, color: .white)
         let nominalCanvas = CGSize(width: 1000, height: 1000)
 
-        let assigned = contentFitAssignment(photoSizes: pixelSizes, template: chosenTemplate, canvasSize: nominalCanvas, border: border)
+        // ---- PASS 1: SEE. ------------------------------------------------
+        // Vision first, for EVERY photo, before any template exists.
+        //
+        // B32 Phase 1 wiring (2026-07-28): this is the structural change.
+        // Until now the order was template -> cell rects -> Vision, because
+        // `autoFrame` needs the cell it is framing into; Vision's output was
+        // therefore only ever available AFTER the layout had been decided, so
+        // the layout could not possibly depend on it. Splitting the loop in
+        // two - see, then decide, then frame - is what lets the faces choose
+        // the template. It costs nothing: the same one Vision pass per photo,
+        // just hoisted above the decision instead of below it.
+        var visionByID: [PhotoID: (faces: [(CGRect, Double)], salient: CGRect?)] = [:]
+        var mustKeepRegions: [PhotoID: CGRect] = [:]
+        var faceRectsByPhotoID: [PhotoID: [CGRect]] = [:]
+        for id in idsInOrder {
+            guard let pixelSize = pixelSizes[id], let cgImage = images[id]?.cgImage else { continue }
+            let vision = await library.visionInputs(cgImage: cgImage)
+            visionByID[id] = vision
+            // B32 Phase 0: keep the raw (thresholded) face rects, which this
+            // flow used to drop on the floor the moment `autoFrame` had
+            // turned them into an ROI. The reveal's glow beat needs the boxes
+            // themselves.
+            let kept = Self.survivingFaces(vision, pixelSize: pixelSize)
+            faceRectsByPhotoID[id] = kept
+            // The Engine owns what "must not be cropped away" means -
+            // surviving faces plus margin, falling back to saliency, and to
+            // nil when Vision found neither (the landscape case). Same
+            // normalized top-left rects that feed `autoFrame` below.
+            if let region = mustKeepRegion(
+                faces: vision.faces.map(\.0),
+                faceConfidences: vision.faces.map(\.1),
+                salientRegion: vision.salient,
+                photoPixelSize: pixelSize
+            ) {
+                mustKeepRegions[id] = region
+            }
+            #if DEBUG
+            NSLog("MAGIC vision: %dx%d rawFaces=%d kept=%d salient=%@ mustKeep=%@",
+                  Int(pixelSize.width), Int(pixelSize.height),
+                  vision.faces.count, kept.count,
+                  vision.salient == nil ? "no" : "yes",
+                  mustKeepRegions[id].map { NSCoder.string(for: $0) } ?? "nil")
+            #endif
+        }
+
+        // ---- PASS 2: DECIDE. ---------------------------------------------
+        // The faces choose the layout. `faceAwareAssignment` searches EVERY
+        // candidate template for this photo count and every assignment of
+        // photos into its slots, scored by `framingCost` (clipped face
+        // dominates; small face, crop loss and aspect mismatch are
+        // tie-breakers) - replacing the old `defaultTemplateIndex` +
+        // `contentFitAssignment` pair, which searched only permutations and
+        // scored on ASPECT alone.
+        //
+        // No fallback is layered on top of it here, deliberately: the Engine
+        // already guarantees that a photo set with no must-keep region
+        // anywhere returns exactly today's `defaultTemplateIndex` +
+        // `contentFitAssignment` answer (see the degrade guard in
+        // `faceAwareAssignment`, and the "face-aware degrade" smoke-test
+        // case). A second guard here could only ever disagree with it.
+        let decision = faceAwareAssignment(
+            photos: idsInOrder,
+            photoSizes: pixelSizes,
+            // `-faceAwareLayoutOff` (DEBUG, same family as `-magicLayoutOff`):
+            // starves the search of must-keep data, which by the Engine's own
+            // degrade guarantee returns precisely today's `defaultTemplateIndex`
+            // + `contentFitAssignment` answer. That makes the aspect-only
+            // "before" reachable from the SAME build as the face-aware
+            // "after" - the only honest way to screenshot the difference, and
+            // the tool Phase 4 will want when a real-camera-roll layout looks
+            // wrong and the question is whether the faces caused it.
+            mustKeepRegions: Self.isFaceAwareLayoutDisabled ? [:] : mustKeepRegions,
+            canvasSize: nominalCanvas,
+            border: border
+        )
+        let assigned = decision.template
+
+        #if DEBUG
+        // Before/after instrumentation (verification only): what today's
+        // aspect-only path WOULD have chosen, so a real pick can be reported
+        // as changed-or-not rather than assumed. Pure logging - nothing below
+        // reads these.
+        let orientations = idsInOrder.map { pixelSizes[$0] ?? CGSize(width: 1, height: 1) }
+        let candidateTemplates = templates(for: idsInOrder)
+        let previousIndex = min(defaultTemplateIndex(orientations: orientations), candidateTemplates.count - 1)
+        let previousAssigned = contentFitAssignment(
+            photoSizes: pixelSizes,
+            template: candidateTemplates[previousIndex],
+            canvasSize: nominalCanvas,
+            border: border
+        )
+        let orderIndex = Dictionary(uniqueKeysWithValues: idsInOrder.enumerated().map { ($0.element, $0.offset) })
+        let previousOrder = photoIDs(in: previousAssigned).map { orderIndex[$0].map(String.init) ?? "?" }.joined(separator: ",")
+        let newOrder = photoIDs(in: assigned).map { orderIndex[$0].map(String.init) ?? "?" }.joined(separator: ",")
+        NSLog("MAGIC decision: template %d->%d perm [%@]->[%@] cost=%.3f mustKeep=%d/%d CHANGED=%@",
+              previousIndex, decision.templateIndex, previousOrder, newOrder,
+              decision.cost, mustKeepRegions.count, idsInOrder.count,
+              (previousIndex != decision.templateIndex || previousOrder != newOrder) ? "YES" : "no")
+        #endif
+
+        // ---- PASS 3: FRAME. ----------------------------------------------
+        // Unchanged B20 auto-framing, now solving against the cells the
+        // face-aware decision produced.
         let (cells, _) = solve(root: assigned, canvasSize: nominalCanvas, border: border)
         let cellRectByID = Dictionary(uniqueKeysWithValues: cells.map { ($0.id, $0.rect) })
 
         var photos: [PhotoID: PhotoRef] = [:]
-        var faceRectsByPhotoID: [PhotoID: [CGRect]] = [:]
         for id in idsInOrder {
             guard let pixelSize = pixelSizes[id] else { continue }
             let cellRect = cellRectByID[id] ?? CGRect(origin: .zero, size: nominalCanvas)
 
             var roi: ROI?
-            if let cgImage = images[id]?.cgImage {
-                let vision = await library.visionInputs(cgImage: cgImage)
-                // B32 Phase 0: keep the raw (thresholded) face rects, which
-                // this flow used to drop on the floor the moment `autoFrame`
-                // had turned them into an ROI. The reveal's box beat needs
-                // the boxes themselves.
-                let kept = Self.survivingFaces(vision, pixelSize: pixelSize)
-                faceRectsByPhotoID[id] = kept
-                #if DEBUG
-                NSLog("MAGIC vision: %dx%d rawFaces=%d kept=%d salient=%@",
-                      Int(pixelSize.width), Int(pixelSize.height),
-                      vision.faces.count, kept.count,
-                      vision.salient == nil ? "no" : "yes")
-                #endif
+            if let vision = visionByID[id] {
                 let input = AutoFrameInput(
                     faces: vision.faces.map(\.0),
                     faceConfidences: vision.faces.map(\.1),

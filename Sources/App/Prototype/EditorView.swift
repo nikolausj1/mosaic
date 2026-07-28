@@ -31,13 +31,17 @@ struct EditorView: View {
     /// to ContentView, which dismisses back to the Picker (Phase 6 wires
     /// "last collage" archiving on top of this same hook).
     var onDone: (() -> Void)? = nil
-    /// B32 Phase 0: the arrival sequence plays in a ContentView-owned overlay
-    /// ABOVE this editor while the editor is quietly mounting underneath it.
-    /// The only thing this view needs from it is "am I still hidden?" - see
+    /// B32: the arrival sequence plays in a ContentView-owned overlay ABOVE
+    /// this editor while the editor is quietly mounting underneath it. Two
+    /// things are read from it here: "am I still hidden?" (see
     /// `triggerGhostDemoIfNeeded`, which must not start teaching gestures on
-    /// a canvas nobody can see yet (and must not reshape that canvas while
-    /// the sequence is morphing photos onto its cells). Nil on any path that
-    /// never runs the sequence.
+    /// a canvas nobody can see yet, and must not reshape that canvas while
+    /// the sequence is morphing photos onto its cells), and
+    /// `suppressEditorChrome`, forwarded to `CanvasView` so the always-on
+    /// divider capsules and corner handles can ARRIVE at the end of the
+    /// sequence instead of having sat there under the scrim the whole time -
+    /// the handoff that tells the user the collage is theirs to touch. Nil on
+    /// any path that never runs the sequence.
     var magicLayout: MagicLayoutController? = nil
 
     @Environment(\.scenePhase) private var scenePhase
@@ -104,7 +108,7 @@ struct EditorView: View {
                         state.selection = nil
                         withAnimation(.easeInOut(duration: 0.2)) { state.activeTray = .none }
                     }
-                CanvasView(state: state, onReady: {
+                CanvasView(state: state, chromeHeldForMagicLayout: magicLayout?.suppressEditorChrome ?? false, onReady: {
                     applyFirstLaunchSelectionIfNeeded()
                     triggerGhostDemoIfNeeded()
                 })

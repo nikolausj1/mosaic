@@ -66,6 +66,13 @@ struct CoachMarkAnchorsKey: PreferenceKey {
 
 struct CanvasView: View {
     let state: EditorState
+    /// B32: true while the Magic Layout sequence is still playing over the
+    /// top of this editor. Holds the always-on overlay chrome back so it can
+    /// arrive as part of the sequence's handoff rather than being revealed
+    /// mid-morph when the scrim lifts. Always false outside a fresh pick
+    /// (restore, `-protoLayout`, Reduce Motion, any skip), so the normal
+    /// editor is completely unaffected.
+    var chromeHeldForMagicLayout: Bool = false
     var onReady: (() -> Void)?
 
     @State private var controller: GestureController?
@@ -168,14 +175,28 @@ struct CanvasView: View {
                 // draggable. The cell's own selection stroke stays
                 // selection-gated below - only these drag affordances lost
                 // their selection requirement.
-                dividerAffordancesOverlay(cells: cells, gutterPts: gutterPts)
+                //
+                // B32 handoff: `chromeHeldForMagicLayout` fades and scales
+                // this whole group in at the END of the arrival sequence
+                // (opacity + a small outward scale, animated by whatever
+                // `withAnimation` the controller flips the flag inside), so
+                // the controls visibly ARRIVE as the theater visibly leaves.
+                // Deliberately opacity rather than an `if`: the affordances
+                // keep their exact geometry and hit areas throughout, and a
+                // touch during the sequence is already caught by the
+                // overlay's own skip catcher above them.
+                Group {
+                    dividerAffordancesOverlay(cells: cells, gutterPts: gutterPts)
 
-                if let selection = state.selection,
-                   let cell = cells.first(where: { $0.id == selection }) {
-                    selectionStrokeOverlay(cell: cell)
+                    if let selection = state.selection,
+                       let cell = cells.first(where: { $0.id == selection }) {
+                        selectionStrokeOverlay(cell: cell)
+                    }
+
+                    bracketsOverlay
                 }
-
-                bracketsOverlay
+                .opacity(chromeHeldForMagicLayout ? 0 : 1)
+                .scaleEffect(chromeHeldForMagicLayout ? 1.035 : 1)
             }
 
             // Coach-mark geometry export (Justin, 2026-07-26): invisible,
