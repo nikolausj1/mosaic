@@ -1,8 +1,8 @@
 ---
 title: "App Store Listing - Mosaic"
 created: 2026-07-26
-modified: 2026-07-26
-version: 1.0
+modified: 2026-07-28
+version: 2.0
 author: Claude Fable 5 (claude-fable-5)
 tags:
 ---
@@ -73,6 +73,84 @@ Initial release.
 **Narrative:** Instagram's Layout defined simple collages for nine years, then stopped. Mosaic is its spiritual successor, built by one developer who wanted the app back and better: every cell auto-frames faces and subjects using the Vision framework entirely on device, seams drag like they always should have, and the finished collage saves at full resolution into the photo library under the date the memory actually happened, the feature Layout famously never shipped. No accounts, no ads, no data leaving the phone.
 
 **Maps to Apple's stated criteria:** innovation (on-device Vision auto-framing, EXIF-true saves), uniqueness (anti-feature philosophy in a category of sticker-filled editors), UI design (single-screen editor, self-teaching gesture grammar, native Liquid Glass icon), privacy (zero collection, documented in the nutrition label).
+
+---
+
+# App Store Connect fill sheet
+
+Everything below is ready to paste into the record created 2026-07-28
+(**Apple ID 6795437010**, bundle `com.levelup.mosaic`, SKU `mosaic-ios-001`).
+
+## URLs (all live and verified)
+
+| Field | Value |
+|---|---|
+| Privacy Policy URL (**required**) | `https://nikolausj1.github.io/mosaic-app-site/privacy.html` |
+| Support URL (**required**) | `https://nikolausj1.github.io/mosaic-app-site/support.html` |
+| Marketing URL (optional) | `https://nikolausj1.github.io/mosaic-app-site/` |
+
+## Category and rating
+
+- Primary category: **Photo & Video**. Secondary: none (or Graphics & Design if a second is wanted).
+- Age rating: **4+**. Every questionnaire item is **None / No** - the app has no violence, no mature themes, no user-generated content sharing, no web access, no gambling, no contests, no ads, and no data collection. It does not have unrestricted web access and is not age-restricted.
+
+## Privacy nutrition label
+
+Answer: **"Data Not Collected."** Nothing else needs filling. The app has no analytics, no third-party SDKs, no accounts, and no servers of its own. Photos are read and written only on the device at the user's direction. The one required-reason API in use (UserDefaults, reason `CA92.1`) is already declared in `Sources/Resources/PrivacyInfo.xcprivacy`.
+
+## App Review notes (paste into "Notes" on the version)
+
+```
+Mosaic is a photo-collage editor. No account, no sign-in, and no demo
+credentials are needed - everything is reachable immediately on launch.
+
+To try it: allow photo access when prompted, tap 2 to 4 photos, tap
+"Next". In the editor, drag any seam between photos to resize, drag the
+round handle where seams meet to reshape, and use the Layout / Ratio /
+Border tabs at the bottom. Tap "Save" to write the collage to the photo
+library. IMPORTANT: the test device or simulator needs at least two
+photos in its library, otherwise the picker is legitimately empty.
+
+In-app purchase: "Remove Watermark" (com.levelup.mosaic.removewatermark)
+is a one-time non-consumable. The app is fully functional without it;
+the only difference is a small Mosaic wordmark in the corner of saved
+collages. The purchase surface is reachable from the "Remove" link on
+the save sheet after saving, or from the gear icon in the top-right of
+the photo picker -> "Remove Watermark". "Restore Purchase" is in the
+same two places.
+
+Privacy: the app makes no network requests of its own and has no
+backend. Face and subject framing uses Apple's on-device Vision
+framework. Nothing about the user or their photos is transmitted
+anywhere.
+```
+
+## In-app purchase configuration
+
+| Field | Value |
+|---|---|
+| Type | Non-Consumable |
+| Reference Name | Remove Watermark |
+| Product ID | `com.levelup.mosaic.removewatermark` |
+| Display Name | Remove Watermark |
+| Description | Removes the small Mosaic wordmark from the corner of every collage you save. One-time purchase, yours forever. |
+| Price | **Justin's call** - `Mosaic.storekit` uses $2.99 as a placeholder only |
+| Review screenshot | `_store/iap/paywall-review-screenshot.png` |
+
+**Caveat on that review screenshot:** it was captured from a plain simulator install, where StoreKit has no product to load, so the button reads "Unlock" with no price. Recapture it from an Xcode run (the scheme has `Mosaic.storekit` attached) once the real price exists, so the button shows the actual amount.
+
+The IAP must be submitted **with** the first version - a new app's in-app purchases are reviewed alongside the build, not separately.
+
+## Screenshots
+
+`_store/screenshots/01-05.png`, five shots at 1320x2868 (6.9" display). Upload in that order - the first two are what most people ever see. Apple scales these down for smaller devices, so no other size is required.
+
+## Version information
+
+- Version: **1.0**, Build: **1** (`project.yml` is the single source; `Info.plist` reads the macros)
+- Copyright: `2026 Justin Nikolaus`
+- Export compliance: `ITSAppUsesNonExemptEncryption` is already `false` in Info.plist, so the encryption question is answered automatically at upload.
+- Release: recommend **manual release** after approval, so the launch moment is yours rather than whenever review finishes.
 
 ---
 
