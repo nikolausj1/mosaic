@@ -133,6 +133,14 @@ These could be settled by dumping strings/resources from an Android APK, **which
 v1 has nothing to configure by design (dark always, no resolution picker, zero-config auto-framing). Candidates that would eventually justify one: watermark toggle (v2 StoreKit), restore purchases (v2), haptics toggle, about/licenses. When one materializes, the ingress is a gear icon in the PICKER header (Screen A) - the editor's chrome budget is spent.
 **Revisit signal:** the first real setting arrives (likely v2's purchase restore).
 
+### B33 - Canvas ratio joins the auto-layout decision
+**Justin, 2026-07-28:** "Are we not considering aspect ratio being a part of what makes a good composition of photos?" Correct - excluding it was scope, not principle.
+**The reframe:** the app already commits to a canvas ratio on arrival; that choice just is not informed by the photos. Ratio is also the highest-leverage variable, since every cell aspect is canvas ratio x template x divider fractions - B32's Phases 1 and 2 optimise the inner two with the outer one pinned. Four portraits in a square canvas is probably the worst common arrival case today.
+**Shape:** start with a crude content rule (all portrait -> portrait preset, all landscape -> landscape, mixed -> square), search PRESETS ONLY (ratio encodes destination - a continuous search finds beautiful unpostable shapes), make the user's manual choice sticky, and only override the default on a clear win.
+**Second payoff:** it gives the corner brackets a real decision to perform in the reveal, which teaches the app's least obvious affordance without a ghost fingertip and without staging.
+**Ruled out:** starting from a deliberately wrong ratio to dramatise the fix - if the canvas always starts wrong and always resolves the same way, engaged users notice the fix never varies and the genuinely real beats fall under suspicion too.
+**Full spec:** `Magic Layout Spec.md`, "Phase 5" - run it BEFORE Phase 4 (tuning should tune the whole decision at once).
+
 ### B32 - Magic Layout (the buildable item: transition + decision + theater)
 **This is the one to kick off.** B30 (face-aware auto-layout) and B31 (the reveal) are the why and the what; **`Magic Layout Spec.md` at the project root is the how**, written to be started immediately without re-deriving anything.
 **What it covers:** the picker-to-canvas transition, the face-aware layout decision, and the reveal animation, as one feature.

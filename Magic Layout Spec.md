@@ -2,7 +2,7 @@
 title: "Magic Layout - Build Spec"
 created: 2026-07-28
 modified: 2026-07-28
-version: 1.2
+version: 1.3
 author: Claude Fable 5 (claude-fable-5)
 tags:
 ---
@@ -106,6 +106,50 @@ Beats, with the constraint that the whole thing is an overlay on an already-fini
 Rationing: full sequence on the first-ever collage, a shortened version afterwards, plus a Settings toggle. Any touch jumps to the end state. Reduce Motion skips entirely.
 
 Degradation: if detection is weak or finds fewer faces than expected, skip the box-reveal beat and just assemble. Never advertise a miss.
+
+**REVISION (Justin, 2026-07-28) - the affordances perform the work; there is no ghost fingertip.**
+
+The original Phase 3 assumed a separate teaching animation. Two problems surfaced: a first-time user today gets the reveal AND the existing ghost gesture demo back to back, roughly seven seconds of watching before they can touch anything; and a demo that distorts the layout and restores it sits badly right after the app has argued that this layout was chosen carefully.
+
+The better shape is one continuous sequence in three movements:
+1. **Assemble** - photos fly, faces glow, the layout resolves. *We did this.*
+2. **Handover** - the glow does not simply fade; it migrates outward into the divider capsules and corner brackets, which light up as it arrives. Same visual language carrying from "our work" to "your controls". *These are yours.*
+3. **Invitation** (first run only) - if anything is still needed after 1 and 2.
+
+Movements 1 and 2 always play; anything in 3 is conditional, which resolves the lifetime mismatch (the reveal is per-pick, teaching is once-ever) without two separate systems.
+
+**The key idea: nothing moves for show.** The affordances perform the REAL adjustment rather than demonstrating a gesture. Phase 2 made this possible - dividers now genuinely move from the template's authored fractions to the chosen ones, so animating that journey is not decoration, it is the delta the intelligence produced. It costs almost nothing, because the layout has to reach those fractions anyway. And it needs no restore, because the motion is productive.
+
+This also redeems the "start from a boring template" instinct honestly: the authored template IS the real before - what you would have got without face-awareness - so no staging is required to show the contrast.
+
+Watch for: **imperceptible deltas** (a divider moving 0.50 -> 0.55 may not read; an overshoot-and-settle easing keeps small moves legible without claiming anything false, below which it is better to skip the emphasis than manufacture drama), and the **no-adjustment case** (faceless sets take the degrade path and nothing moves - correct, and it makes motion mean something: movement signals the app found something, stillness signals it did not).
+
+**Open, pending the device pass:** whether the existing ghost gesture demo is still needed at all. The divider capsules and corner brackets are now always visible, and the reveal already puts the eye on the layout, so the grammar may teach itself - which was the PRD's original position. Until Phase 5 lands the brackets can only glow (no decision sits behind them, so moving them would be faking); after it, they can perform.
+
+### Phase 5 - Canvas ratio joins the decision (and gives the brackets something true to perform)
+
+**Run this BEFORE Phase 4.** Tuning should tune the whole decision at once, and this changes the outermost variable.
+
+**Why it belongs (Justin, 2026-07-28).** The app already commits to a canvas ratio the moment a collage arrives - that choice simply is not informed by the photos. So this is not "should the app decide"; it already decides, badly. Ratio is also plausibly the highest-leverage variable in the system, because every cell aspect is a product of canvas ratio x template x divider fractions: Phases 1 and 2 optimise the inner two while the outer one is pinned. Four portraits in a square canvas crops every face harder than necessary no matter how well the dividers move, and that is probably the worst common arrival case in the app today.
+
+**Start crude, on purpose.** A simple content rule captures most of the value and is a few lines in the Engine:
+- all photos portrait -> prefer a portrait preset
+- all landscape -> prefer a landscape preset
+- mixed -> square
+A later refinement can score the combined must-keep regions' aspect through `framingCost` the same way cells are scored, but do NOT start there.
+
+**Constrain the search to the RATIO PRESETS, deliberately.** Ratio encodes destination, not only composition - 9:16 means a Story, 4:5 means the tallest Instagram feed post. A continuous search would always find some perfect-fitting 2.37:1 canvas that is beautiful and unpostable. The presets carry destination-appropriateness the cost function cannot see. The algorithm picks among presets; the user drags the brackets to anything they like. Each does what it is good at.
+
+**Two guardrails, both judgement calls that want real photos:**
+1. **Sticky preference.** Once the user sets a ratio by hand, that is stated intent - remember it and stop guessing, exactly as border thickness now works. Auto-choose only where no preference exists.
+2. **Override threshold.** Only depart from the default when the improvement is clearly significant. Churning the canvas shape for a marginal gain is worse than a mediocre default.
+
+**The animation payoff.** Today the brackets can only glow, because no decision sits behind them - see the Phase 3 revision. Once ratio is genuinely chosen, the brackets have something true to perform: the canvas visibly reshaping to suit the photos, through the same control the user will later grab. That teaches the corner gesture - the app's least obvious, highest-value affordance - without a ghost fingertip and without staging.
+
+**Explicitly ruled out: starting from a deliberately wrong ratio to dramatise the fix.** It reads as a comparative claim ("we improved this for you") that no decision backs. The practical objection is stronger than the principled one: if the canvas always starts wrong and always resolves the same way regardless of content, the users who make five or ten collages notice the fix never varies, and at that point the whole sequence reads as canned - which puts the genuinely real beats (detection, template choice, divider moves) under suspicion too. The real work is impressive enough to carry the theater; faking one beat devalues the rest.
+
+Acceptance: Engine-only decision with smoke-test coverage (all-portrait, all-landscape, mixed, single-photo-dominant, and a sticky-preference case that must NOT be overridden); the faceless degrade path unchanged; and a measured decision time that keeps the whole search inside budget (Phase 2 alone is ~7ms worst case, so a preset sweep needs pruning or an early-out).
+
 
 ### Phase 4 - Tune against a real camera roll
 
