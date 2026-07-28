@@ -133,6 +133,19 @@ These could be settled by dumping strings/resources from an Android APK, **which
 v1 has nothing to configure by design (dark always, no resolution picker, zero-config auto-framing). Candidates that would eventually justify one: watermark toggle (v2 StoreKit), restore purchases (v2), haptics toggle, about/licenses. When one materializes, the ingress is a gear icon in the PICKER header (Screen A) - the editor's chrome budget is spent.
 **Revisit signal:** the first real setting arrives (likely v2's purchase restore).
 
+### B31 - "Magic layout" reveal: show the work so the app gets credit for it
+**Idea (Justin, 2026-07-28):** photos land in a deliberately plain template, then a sweep of "magic energy" crosses the composition, real face bounding boxes light up, and the layout morphs - ghost-demo style - into the chosen one. All on device. "This animation and these steps are Theater, but it is to get the wow from our users."
+**Why it is right:** the app already does the impressive thing (on-device Vision framing) and the user perceives nothing, because it is instant and invisible. Invisible work earns no credit. This is also the single best 15 seconds of an App Store preview video and the clearest demonstration of the "innovation" criterion in the featuring pitch.
+**The line that keeps it honest:** the plain starting template must be the template the app would genuinely have used without face-awareness, and the boxes must be the real detections. Then it is a visualization of real work, not a fake. Faked boxes or a staged "before" would be indefensible the moment a reviewer looks closely - and it would undercut the very claim it exists to make. This is an argument for building B30 properly rather than around it.
+**Design constraints this has to respect:**
+- **Never a gate.** The final layout must be usable the instant it exists; the reveal is an overlay over an already-finished result, and ANY touch jumps straight to the end state.
+- **Frequency is the whole design.** Delightful three times, infuriating thirty. Full show on the first-ever collage, a much shorter version afterwards, and a Settings toggle. A 2s ceremony on every arrival makes a fast app feel slow.
+- **Degrade quietly.** If detection is weak or finds fewer faces than expected, skip the box-reveal and just morph - never advertise a miss.
+- **Reduce Motion** cuts straight to the final layout, as the ghost demo already does.
+**On the proposed toggle:** a button that reverts to the boring template is odd - nobody wants "make it worse." Better as a **re-run / shuffle**: tap it and the magic replays, landing on the next-best scoring layout. Same affordance, same theater on demand, but it moves forward instead of backward. Manual escape already exists in the Layout tab, and Undo covers regret.
+**Sequencing:** the reveal is worth little without B30 underneath, since today there is no layout DECISION to dramatize - only per-cell framing. Cheap phase 0: dramatize the framing that already happens (boxes appear, each cell pans/zooms to its chosen crop) with no B30 at all, to test whether the theater lands before investing in the real thing.
+**Related:** B30 (the decision this dramatizes), B20 (auto-zoom, already the riskiest shipped feature - this puts a spotlight on it).
+
 ### B30 - Face-aware auto-layout (choose the TEMPLATE from the faces, not just the crop)
 **Idea (Justin, 2026-07-28):** "auto create a layout by finding the bounding faces of a photo and making sure they are all visible and appropriate for that layout and zoom level and crop."
 **What exists already:** Vision runs per photo at arrival and yields an ROI that drives auto-framing (pan/zoom) INSIDE an already-chosen cell (B20). Template choice is orientation-based; photo-to-cell assignment is brute-forced over <=24 permutations by ASPECT match only (`contentFitAssignment`, cost = |log(photoAspect) - log(cellAspect)|). Nothing today scores whether a face survives the crop.
