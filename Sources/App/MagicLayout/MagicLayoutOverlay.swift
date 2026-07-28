@@ -252,6 +252,17 @@ final class MagicLayoutController {
             MagicTiming.mark("sequence bypassed (Reduce Motion / -magicLayoutOff)")
             return false
         }
+        // Nothing to fly (2026-07-28 review). The denied/limited-access
+        // "Choose Photos" path builds its document from `fallbackPicks`,
+        // which never populates `selectedAssetIDs` - so `magicSources()` is
+        // legitimately empty there and the sequence would otherwise play out
+        // in full over zero photos: a dark scrim, a sweep across nothing,
+        // and about a second and a half of dead time before the crossfade.
+        // Returning false hands that path back to the ordinary spinner.
+        guard !sources.isEmpty else {
+            MagicTiming.mark("sequence declined (no source thumbnails)")
+            return false
+        }
 
         self.sources = sources
         completion = nil

@@ -107,8 +107,19 @@ final class PickerState {
         }
     }
 
+    /// MERGES rather than replaces (2026-07-28 review). `PickedThumbFramesKey`
+    /// only carries the grid cells `LazyVGrid` currently has realized, so a
+    /// straight assignment dropped the frame of any selected photo the user
+    /// had since scrolled past - and `magicSources()` then silently
+    /// `compactMap`ed it away, so that photo took no part in the flight and
+    /// simply appeared at the settle. Select near the top, scroll, select
+    /// again, tap Next and you would see it. Keeping the last known frame is
+    /// correct as well as sufficient: a photo can only be selected by being
+    /// tapped, so it was on screen at least once while selected, and flying
+    /// in from off the edge is exactly where it actually was.
     func recordThumbFrames(_ frames: [String: CGRect]) {
-        thumbFrames = frames
+        thumbFrames.merge(frames) { _, new in new }
+        thumbFrames = thumbFrames.filter { selectedAssetIDs.contains($0.key) }
     }
 
     /// Called by `GridThumbnail` whenever a SELECTED cell has a bitmap in
