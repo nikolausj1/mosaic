@@ -1,8 +1,8 @@
 ---
 title: "Photo Collage - Product Requirements Document"
 created: 2026-07-16
-modified: 2026-07-16
-version: 1.0
+modified: 2026-07-26
+version: 1.1
 author: Justin Nikolaus + Claude Opus 4.8
 tags:
 ---
@@ -104,7 +104,7 @@ This is the tiebreaker for every micro-decision in the gesture layer. If a featu
 - **Non-rectangular cells, shapes, masks.** Different product.
 - **Video.** Different product.
 - **A project library / multiple saved documents.** That's naming, thumbnails, deletion, and storage management for a tool where you make a collage and export it thirty seconds later. One autosaved document plus one level of "edit last" covers the real cases.
-- **Onboarding, tutorial, or intro screens.** Layout's unskippable ~60-second intro was a recurring complaint for nine years. The app teaches itself through its handle grammar (section 7) or it has failed.
+- **Blocking onboarding.** REVISED 2026-07-26 (Justin, B27 closed as option c): the original principle ruled out ALL onboarding; the app now ships a single dismissible welcome card plus contextual coach marks on the first editor entry. The retained line: teaching happens in place, pointing at the real controls, dismissed by doing - never an unskippable multi-screen intro (Layout's ~60-second version was a nine-year complaint). The handle grammar still has to survive without it.
 - **iPad and landscape orientation.** A 16:9 canvas simply renders short and wide in portrait; there is no reason to rotate the device. Removes an entire category of layout work.
 - **Backend, accounts, cloud sync, analytics.** Per the Build Guide's no-backend default. Nothing leaves the device.
 - **Runtime AI calls of any kind.** Per the Build Guide.
@@ -194,7 +194,7 @@ Applies **on arrival only.** Once you're in the editor, placement is yours - swa
 
 **Default selection on arrival:** **on the first-ever entry to the editor, and only then, cell one arrives selected** - outline and capsules visible, doing nothing. Every entry afterwards arrives with nothing selected. One persisted boolean.
 
-This is deliberate and it is the app's entire onboarding. Section 4 rules out tutorials and intro screens, which means **the handle grammar has to teach itself or the app has failed** - and a silent, self-explaining first state is the only teacher we've allowed ourselves. Layout auto-selected the first cell on every entry (verified across two independent recordings) and its grammar demonstrably taught itself for nine years; we take the teaching moment and decline the permanent tax. **Do not "clean this up" - it looks like a bug and it is the plan.**
+This is deliberate and it remains the app's core teacher. (Revised 2026-07-26 with B27: a welcome card and first-entry coach marks now layer on top - see section 4 - but they annotate the real controls rather than replace this mechanism.) Layout auto-selected the first cell on every entry (verified across two independent recordings) and its grammar demonstrably taught itself for nine years; we take the teaching moment and decline the permanent tax. **Do not "clean this up" - it looks like a bug and it is the plan.**
 
 ### Auto-framing (on-device Vision)
 

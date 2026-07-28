@@ -51,8 +51,9 @@ Claude Code: do not act on anything in this file. If you hit one of these while 
 
 ## Deferred features (wanted, not now)
 
-### B8 - IAP + watermark (v2, the plan of record)
-StoreKit 2 non-consumable, one-time unlock. Watermark: ~4% of the long edge, bottom-right, inside the outer margin if one exists, white with a subtle dark stroke. **The v1 export pipeline already ends in a single compositing hook** - this is a small, contained addition, not a refactor.
+### B8 - IAP + watermark (PULLED INTO v1 - decided 2026-07-26 by Justin, BUILT same day)
+Launch model is freemium: free download, every feature included, exports watermarked until a one-time unlock. Shipped implementation: StoreKit 2 non-consumable `com.levelup.mosaic.removewatermark` (placeholder $2.99, final price set in App Store Connect), `StoreService` + `PaywallSheet` + save-sheet notice + B28's gear-in-picker Settings sheet, watermark drawn by `WatermarkDecorator` through CollageRenderer's ExportDecorator hook exactly per the spec below. Sim-verified end to end 2026-07-26 (watermark renders correctly on a real export; purchase flow still needs an Xcode run with Mosaic.storekit or a sandbox account).
+Original spec: StoreKit 2 non-consumable, one-time unlock. Watermark: ~4% of the long edge, bottom-right, inside the outer margin if one exists, white with a subtle dark stroke. **The v1 export pipeline already ends in a single compositing hook** - this is a small, contained addition, not a refactor.
 **Trigger:** Justin has used the app for several weeks and still wants it. Also requires: the rename (B16), an App Store Connect record, screenshots, and a privacy nutrition label for the photo-library permission.
 **Strategic note:** every ranked competitor is a subscription. One-time purchase is the wedge, not just a price.
 
@@ -85,7 +86,8 @@ Arbitrary-angle rotation within a cell, snapping at 0. Rejected for v1: Photos.a
 **Trigger:** crooked horizons that Photos didn't already fix.
 
 ### B16 - The rename
-**Blocking for App Store, non-blocking for the build.** v1 builds as "Collage" / `com.levelup.collage` / repo `photo-collage`.
+**DECIDED 2026-07-26 (Justin): keep Mosaic as the brand; submit under a compound App Store title, working wording "Mosaic: Photo Collage & Layout" (final wording locked with the listing copy).** Mitigates the discovered exact-category App Store collision ("Mosaic - Video & Photo Collage", id 633846868) and photomosaic search dilution. Residual trademark risk (13 leading matches) acknowledged and accepted; revisit only if App Review or a rights holder objects.
+**Original framing, kept for the record:** Blocking for App Store, non-blocking for the build. v1 builds as "Collage" / `com.levelup.collage` / repo `photo-collage`.
 Shortlist so far, all availability-verified against Apple's live index:
 - **Plain-language pass:** Spreads (exact=0, leading=0 - the cleanest plain-English result found; `spreads.photos` open), Mosaic (best comprehension, but 13 leading matches and *a mosaic is thousands of tiny tiles, not 2-4 big photos*), Gridly (coined, owns its namespace, but "grid" names the rigidity this app removes)
 - **Craft-vocabulary pass (rejected as too obscure, kept for the record):** Muntin (the strip dividing a window into panes - the app named after its own core interaction; verified clear, `muntin.photo` open), Reglet, Casement, Transom, Kerf
@@ -123,7 +125,7 @@ These could be settled by dumping strings/resources from an Android APK, **which
 **Why not:** re-running on topology or ratio changes makes photos move by themselves, and re-running during a divider drag makes them swim under your finger. The one-shot version slots into the existing `center` field with zero new rules.
 **Revisit signal:** photos that hold multiple subjects are consistently badly framed after a topology change.
 
-### B27 - Onboarding screens (OPEN QUESTION - PRD conflict, needs Justin's explicit call)
+### B27 - Onboarding screens (CLOSED 2026-07-26: Justin chose option (c), welcome card + contextual coach marks; PRD section 4 principle formally revised same day; built 2026-07-26)
 **Justin asked (2026-07-17)** for splash + onboarding screens for first launch. The launch screen (dark, native) shipped. Onboarding screens directly contradict the PRD's locked no-tutorials principle ("the handle grammar has to teach itself or the app has failed") and its designed alternative (first-ever-launch auto-selection as the entire onboarding). Options on the table: (a) keep the PRD's position - no onboarding; (b) a single dismissible one-time hint line, not a carousel; (c) full onboarding screens, formally revising the PRD principle. Claude recommends (a), accepts (b); (c) needs the PRD principle rewritten, not just screens added.
 **Revisit signal:** anyone Justin hands the app to fails to discover pan/resize/swap within the first minute.
 
