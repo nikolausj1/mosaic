@@ -14,23 +14,42 @@ struct MosaicApp: App {
 ///   - current.json exists  -> restore straight into the Editor.
 ///   - no current.json      -> Picker (with "Edit last collage" if last.json exists).
 /// Confirming a selection in the Picker hands a built Document to EditorView
-/// ("New collage committed" - deletes last.json, starts autosaving as
-/// current). "New" in the editor discards current.json and returns here.
-/// Done on the save sheet archives current.json -> last.json before
-/// returning here.
+/// ("New collage committed" - archives any current.json to last.json first,
+/// then starts autosaving the new document as current). Done on the save
+/// sheet archives current.json -> last.json before returning here.
+///
+/// Nothing-is-destructive navigation (Justin, 2026-07-26): the editor's back
+/// button (`onNew:`) no longer discards anything - it just returns to the
+/// Picker, leaving current.json exactly as autosave last wrote it. The
+/// Picker then offers "Continue current collage" (current.json) alongside
+/// "Edit last collage" (last.json) - both can exist at once. The only way
+/// current.json is ever replaced is by confirming a NEW pick, which archives
+/// the old current to last first (see `commitNewCollage`) - so nothing is
+/// ever silently lost, only ever superseded.
 struct ContentView: View {
     @State private var pickerState = PickerState()
     @State private var editorState: EditorState?
     @State private var didHandleLaunchArgs = false
+    /// B8: one instance for the app's lifetime, threaded into the Picker
+    /// (gear icon -> Settings) and Editor (save-sheet notice + the
+    /// entitlement check `performSave()` reads) - see `StoreService.start()`.
+    @State private var storeService = StoreService()
 
     var body: some View {
         Group {
             if let editorState {
                 EditorView(
                     state: editorState,
-                    // New (discard confirm): delete current.json, back to Picker.
+                    storeService: storeService,
+                    // Nothing-is-destructive navigation (Justin, 2026-07-26):
+                    // this is just "back to photos" now, not a discard.
+                    // current.json stays exactly as autosave last wrote it -
+                    // the Picker's "Continue current collage" row is how you
+                    // get back in. Picking a NEW set is what actually
+                    // replaces this collage (it archives current -> last
+                    // first, see `commitNewCollage`); backing out here never
+                    // throws anything away.
                     onNew: {
-                        DocumentStore.deleteCurrent()
                         self.editorState = nil
                     },
                     // Phase 5: non-nil enables the Save button (EditorView's
@@ -50,8 +69,13 @@ struct ContentView: View {
             } else {
                 PickerView(
                     state: pickerState,
+                    storeService: storeService,
                     onConfirmed: { doc, images in
                         commitNewCollage(document: doc, images: images)
+                    },
+                    hasCurrentCollage: DocumentStore.hasCurrentCollage,
+                    onContinueCurrent: {
+                        Task { await continueCurrentCollage() }
                     },
                     hasLastCollage: DocumentStore.hasLastCollage,
                     onEditLastCollage: {
@@ -66,13 +90,24 @@ struct ContentView: View {
             didHandleLaunchArgs = true
             await applyLaunchArgsIfNeeded()
         }
+        // Independent of launch-arg handling above: entitlement should start
+        // resolving immediately regardless of which routing branch wins, and
+        // this task's own `updatesTask == nil` guard makes a second `.task`
+        // firing (e.g. a scenePhase-driven re-render) a no-op.
+        .task {
+            await storeService.start()
+        }
     }
 
     /// "New collage committed" (PRD: "Next from the picker"): both the real
     /// picker confirm flow and the `-autoPick` debug path funnel through
-    /// here, so the deleteLast()-then-edit contract is exactly one code path.
+    /// here, so the archive-then-adopt contract is exactly one code path.
+    /// Nothing-is-destructive navigation (Justin, 2026-07-26): the previous
+    /// current.json (if any) is archived to last.json - not deleted - before
+    /// the new document is adopted, so confirming a new pick supersedes the
+    /// in-flight collage rather than discarding it.
     private func commitNewCollage(document: Document, images: [PhotoID: UIImage]) {
-        DocumentStore.deleteLast()
+        DocumentStore.archiveCurrentAsLast()
         let state = EditorState(document: document, images: images, photoStore: PhotoStore(), layoutIndex: 0)
         // Fresh-pick arrivals open with the Layout tray up (Justin,
         // 2026-07-17): choosing the topology is the natural first move
@@ -86,6 +121,15 @@ struct ContentView: View {
     /// the Editor.
     private func editLastCollage() async {
         guard let document = DocumentStore.promoteLastToCurrent() else { return }
+        await restoreEditor(from: document)
+    }
+
+    /// "Continue current collage" (Justin, 2026-07-26): current.json is
+    /// already current, so unlike `editLastCollage` above there's no
+    /// promotion step - just load it back into the Editor via the same
+    /// restore path launch uses.
+    private func continueCurrentCollage() async {
+        guard let document = DocumentStore.loadCurrent() else { return }
         await restoreEditor(from: document)
     }
 
@@ -144,13 +188,18 @@ struct ContentView: View {
     /// restore current.json if present, else fall through to the Picker
     /// (already the `else` branch above).
     private func applyLaunchArgsIfNeeded() async {
+        #if DEBUG
         let args = ProcessInfo.processInfo.arguments
 
-        #if DEBUG
         if args.contains("-resetPersistence") {
             DocumentStore.resetAll()
+            // Onboarding (Justin, 2026-07-26, B27 option c): both flags ride
+            // along with the same reset so automation/screenshots can
+            // exercise the welcome card and coach marks from a clean slate,
+            // not just a clean document store.
+            UserDefaults.standard.removeObject(forKey: "hasSeenWelcome")
+            UserDefaults.standard.removeObject(forKey: "hasSeenCoachMarks")
         }
-        #endif
 
         if let idx = args.firstIndex(of: "-protoLayout"), idx + 1 < args.count, let n = Int(args[idx + 1]) {
             let store = PhotoStore()
@@ -168,6 +217,7 @@ struct ContentView: View {
             }
             return
         }
+        #endif
 
         if let document = DocumentStore.loadCurrent() {
             await restoreEditor(from: document)
