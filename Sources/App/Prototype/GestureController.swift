@@ -172,8 +172,11 @@ func capsuleSpecs(cellRect: CGRect, owners: EdgeOwners, gutterPts: Double) -> [C
 }
 
 /// Hit zone for a capsule: a 44pt-wide band along its length (centered on
-/// the same axis-line, widened perpendicular to it).
-private func capsuleHitZone(_ spec: CapsuleSpec) -> CGRect {
+/// the same axis-line, widened perpendicular to it). Not `private` (Justin,
+/// 2026-07-26): CanvasView's coach-mark geometry export reuses this exact
+/// math to size the divider cutout hole, rather than inventing a second set
+/// of padding numbers for the same capsule.
+func capsuleHitZone(_ spec: CapsuleSpec) -> CGRect {
     switch spec.side {
     case .left, .right:
         return CGRect(x: spec.rect.midX - 22, y: spec.rect.minY, width: 44, height: spec.rect.height)
@@ -204,6 +207,124 @@ func cornerHandleSpecs(cellRect: CGRect, owners: EdgeOwners, gutterPts: Double) 
         specs.append(CornerHandleSpec(corner: .bottomRight, center: CGPoint(x: cellRect.maxX + g, y: cellRect.maxY + g)))
     }
     return specs
+}
+
+// MARK: - Divider-drag math (hoisted to free functions, Justin 2026-07-26)
+
+/// Per-divider drag state, computed once at drag start from the pre-drag
+/// document: the parent split's original fractions/children, how many
+/// points of on-screen travel span the whole usable track, and the
+/// snap-to-candidate machinery. Was a `private` type nested inside
+/// `GestureController`; hoisted to file scope (with `makeDividerInfo`/
+/// `applyDividerDelta` below) so the ghost gesture demo (EditorView.swift)
+/// can drive the EXACT same divider math the real corner/divider drag
+/// uses, just fed a synthetic time curve instead of live per-frame touch
+/// deltas - see EditorView's `animateBracketDrag`/`animateDividerDrag`.
+struct DividerInfo {
+    let ref: DividerRef
+    let parentPath: [Int]
+    let originalFractions: [Double]
+    let children: [Node]
+    let usableExtent: Double
+    let candidates: [Double]
+    let tolerance: Double
+    var wasSnapped = false
+    var floorExceeded = false
+}
+
+/// Captures everything a divider drag needs from the document/canvas at
+/// touch-down (or, for the ghost demo, at the moment it starts animating a
+/// divider) - see `DividerInfo`'s doc comment.
+func makeDividerInfo(_ ref: DividerRef, document: Document, canvasSize: CGSize) -> DividerInfo {
+    let root = document.root
+    let border = document.border
+
+    guard case .split(_, let fractions, let children)? = node(at: ref.path, in: root),
+          let parentRect = nodeRect(at: ref.path, in: root, canvasSize: canvasSize, border: border) else {
+        return DividerInfo(ref: ref, parentPath: ref.path, originalFractions: [], children: [], usableExtent: 0, candidates: [], tolerance: 0)
+    }
+
+    let shortEdge = min(canvasSize.width, canvasSize.height)
+    let gutterPts = border.inner * shortEdge
+    let isH = ref.axis == .horizontal
+    let totalExtent = isH ? parentRect.width : parentRect.height
+    let usable = totalExtent - gutterPts * Double(children.count - 1)
+    let candidates = snapCandidates(forDividerAt: ref.path, index: ref.index, root: root, canvasSize: canvasSize, border: border)
+    let tolerance = usable > 0 ? 8.0 / usable : 0
+
+    return DividerInfo(ref: ref, parentPath: ref.path, originalFractions: fractions, children: children, usableExtent: usable, candidates: candidates, tolerance: tolerance)
+}
+
+/// Pure divider-drag math: given the total on-screen delta since the drag
+/// began (mirrors `DragGesture.Value.translation`, real or synthetic),
+/// mutates `info`'s snap/floor tracking and writes the new fractions into
+/// `doc`. No side effects beyond `info`/`doc` (no haptics, no `state`
+/// access) - returns which edge-case flags flipped on THIS call so the
+/// caller can decide what feedback (if any) to play. `GestureController`
+/// plays haptics on both flips (see `handleDivider`/`handleCorner` below);
+/// the ghost demo (EditorView.swift) ignores the return value - a silent
+/// demo, no haptic buzzing during onboarding.
+@discardableResult
+func applyDividerDelta(_ info: inout DividerInfo, deltaPoints: CGFloat, doc: inout Document) -> (snappedNow: Bool, floorExceededNow: Bool) {
+    guard info.usableExtent > 0 else { return (false, false) }
+    let deltaFraction = Double(deltaPoints) / info.usableExtent
+
+    let floor = Layout.minCellFraction
+    let f0 = info.originalFractions[info.ref.index]
+    let f1 = info.originalFractions[info.ref.index + 1]
+    let minDelta = floor - f0
+    let maxDelta = f1 - floor
+    let exceeds = deltaFraction < minDelta || deltaFraction > maxDelta
+    let floorExceededNow = exceeds && !info.floorExceeded
+    info.floorExceeded = exceeds
+
+    let result = dragDivider(fractions: info.originalFractions, index: info.ref.index, deltaFraction: deltaFraction, snapCandidates: info.candidates, toleranceFraction: info.tolerance)
+    let snappedNow = result.snapped && !info.wasSnapped
+    info.wasSnapped = result.snapped
+
+    let newNode = Node.split(axis: info.ref.axis, fractions: result.fractions, children: info.children)
+    doc.root = replacingNode(at: info.parentPath, in: doc.root, with: newNode)
+    return (snappedNow, floorExceededNow)
+}
+
+/// Picks the same "most central" divider CanvasView's coach-mark anchor
+/// export highlights (see CanvasView's `coachMarkTargetRects`), but returns
+/// the underlying `DividerRef` needed to actually MUTATE the document, not
+/// just a visual rect - used by the ghost gesture demo (EditorView.swift) to
+/// know which divider its phase-2 divider-drag should animate. Shared
+/// "nearest to canvas center" tie-break with `coachMarkTargetRects` so the
+/// demo always targets the exact same divider the old coach marks used to
+/// spotlight. Nil when the layout has no interior divider at all (a single-
+/// photo canvas) - the demo skips its divider phase then, degrading
+/// gracefully to just the bracket phase.
+///
+/// (Justin, 2026-07-27): this used to also search for the most central
+/// interior CORNER handle (`cornerHandleSpecs`/`cornerDividerRefs`), for a
+/// demo phase that dragged it. Removed per Justin's on-device feedback: in a
+/// 2x2 grid that handle IS the middle intersection point, which read as "the
+/// middle point moving" rather than a corner - not what he wanted taught.
+/// The demo's phase 1 now drags a canvas composition BRACKET instead (see
+/// `bracketAnchor`/`BracketInfo`/`applyBracketDelta` below), which is a
+/// FIXED point independent of the document's cell layout, so it needs no
+/// per-cell search at all - `cornerHandleSpecs`/`cornerDividerRefs`
+/// themselves are untouched and still back the real (non-demo) interior
+/// corner-drag gesture.
+func centralDivider(cells: [CellFrame], root: Node, canvasSize: CGSize, gutterPts: Double) -> DividerRef? {
+    let center = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
+    var best: (ref: DividerRef, dist: CGFloat)?
+
+    for cell in cells {
+        guard let path = leafPath(for: cell.id, in: root) else { continue }
+        let owners = edgeOwners(forLeafPath: path, root: root)
+
+        for spec in capsuleSpecs(cellRect: cell.rect, owners: owners, gutterPts: gutterPts) {
+            guard let ref = ownerRef(spec.side, owners: owners) else { continue }
+            let hitZone = capsuleHitZone(spec)
+            let d = hypot(hitZone.midX - center.x, hitZone.midY - center.y)
+            if best == nil || d < best!.dist { best = (ref, d) }
+        }
+    }
+    return best?.ref
 }
 
 enum BracketCorner: CaseIterable, Hashable {
@@ -306,6 +427,75 @@ private let ratioPresets: [(w: Double, h: Double)] = [
     (1, 1), (4, 5), (5, 4), (3, 4), (4, 3), (2, 3), (3, 2), (9, 16), (16, 9)
 ]
 
+// MARK: - Bracket-drag math (hoisted to free functions, Justin 2026-07-27)
+
+/// Per-bracket drag state: the vertex corner being dragged and the canvas
+/// size at drag start. Trivial compared to `DividerInfo` (no document
+/// dependency - the bracket controls the CANVAS's own ratio, not a cell's
+/// fractions) - only `snappedPresetIndex` needs to persist between ticks (to
+/// detect a NEW snap, for haptics on a real drag). Was a `private` type
+/// nested inside `GestureController`; hoisted to file scope (with
+/// `applyBracketDelta` below) so the ghost gesture demo (EditorView.swift)
+/// can drive the EXACT same bracket-resize math the real bracket drag uses,
+/// just fed a synthetic time curve instead of live per-frame touch deltas -
+/// see EditorView's `animateBracketDrag`. Follows the same pattern
+/// `DividerInfo`/`makeDividerInfo`/`applyDividerDelta` established above.
+struct BracketInfo {
+    let corner: BracketCorner
+    let originalSize: CGSize
+    var snappedPresetIndex: Int?
+}
+
+/// Pure bracket-resize math: given the total on-screen delta since the drag
+/// began (mirrors `DragGesture.Value.translation`, real or synthetic),
+/// computes the new canvas size from `info.originalSize` + `info.corner`'s
+/// sign convention, snapping to the nearest preset ratio within tolerance,
+/// and mutates `info.snappedPresetIndex`. Unlike `applyDividerDelta`, this
+/// has no `Document` to write into - the canvas ratio isn't part of a cell's
+/// fractions - so it just returns the resulting `ratio`/`liveSize`; the
+/// caller (`handleBracket` for a real drag, `animateBracketDrag` for the
+/// demo) applies them to `state.document.canvasRatio`/`state.liveCanvasSize`
+/// itself and decides what feedback (if any) to play on `snappedNow` (the
+/// demo discards it - a silent demo, same as `applyDividerDelta`'s callers).
+@discardableResult
+func applyBracketDelta(_ info: inout BracketInfo, translation: CGSize) -> (ratio: Ratio, liveSize: CGSize, snappedNow: Bool) {
+    let dx = translation.width
+    let dy = translation.height
+    var newWidth = info.originalSize.width
+    var newHeight = info.originalSize.height
+
+    switch info.corner {
+    case .topLeft: newWidth -= dx; newHeight -= dy
+    case .topRight: newWidth += dx; newHeight -= dy
+    case .bottomLeft: newWidth -= dx; newHeight += dy
+    case .bottomRight: newWidth += dx; newHeight += dy
+    }
+    newWidth = max(newWidth, 120)
+    newHeight = max(newHeight, 120)
+
+    var ratioValue = newWidth / newHeight
+    var snappedIndex: Int?
+    for (i, preset) in ratioPresets.enumerated() {
+        let presetValue = preset.w / preset.h
+        if abs(log(ratioValue) - log(presetValue)) < 0.035 {
+            snappedIndex = i
+            ratioValue = presetValue
+            break
+        }
+    }
+    let snappedNow = info.snappedPresetIndex == nil && snappedIndex != nil
+    info.snappedPresetIndex = snappedIndex
+
+    let finalRatio: Ratio
+    if let idx = snappedIndex {
+        finalRatio = Ratio(width: ratioPresets[idx].w, height: ratioPresets[idx].h)
+    } else {
+        finalRatio = Ratio(width: newWidth, height: newHeight)
+    }
+
+    return (finalRatio, CGSize(width: newWidth, height: newHeight), snappedNow)
+}
+
 // MARK: - The state machine
 
 @MainActor
@@ -344,24 +534,6 @@ final class GestureController {
         let originalRef: PhotoRef
         let s0: Double
         let effectiveSize: CGSize
-    }
-
-    private struct DividerInfo {
-        let ref: DividerRef
-        let parentPath: [Int]
-        let originalFractions: [Double]
-        let children: [Node]
-        let usableExtent: Double
-        let candidates: [Double]
-        let tolerance: Double
-        var wasSnapped = false
-        var floorExceeded = false
-    }
-
-    private struct BracketInfo {
-        let corner: BracketCorner
-        let originalSize: CGSize
-        var snappedPresetIndex: Int?
     }
 
     private struct PinchInfo {
@@ -493,10 +665,13 @@ final class GestureController {
             phase = .bracket(BracketInfo(corner: corner, originalSize: state.canvasSize, snappedPresetIndex: nil))
         case .corner(let x, let y):
             state.debugLog("down->corner x\(x.path)/\(x.index) y\(y.path)/\(y.index)")
-            phase = .corner(x: makeDividerInfo(x), y: makeDividerInfo(y))
+            phase = .corner(
+                x: makeDividerInfo(x, document: state.document, canvasSize: state.canvasSize),
+                y: makeDividerInfo(y, document: state.document, canvasSize: state.canvasSize)
+            )
         case .divider(let ref):
             state.debugLog("down->divider \(ref.path)/\(ref.index) \(ref.axis)")
-            phase = .divider(makeDividerInfo(ref))
+            phase = .divider(makeDividerInfo(ref, document: state.document, canvasSize: state.canvasSize))
         case .photo(let id, let rect):
             state.debugLog("down->photo \(String(id.uuidString.prefix(4)))")
             phase = .tracking(TrackingInfo(cellID: id, cellRect: rect, startLocation: point, startTime: Date()))
@@ -505,27 +680,6 @@ final class GestureController {
             state.debugLog("down->empty")
             phase = .tracking(TrackingInfo(cellID: nil, cellRect: nil, startLocation: point, startTime: Date()))
         }
-    }
-
-    private func makeDividerInfo(_ ref: DividerRef) -> DividerInfo {
-        let root = state.document.root
-        let canvasSize = state.canvasSize
-        let border = state.document.border
-
-        guard case .split(_, let fractions, let children)? = node(at: ref.path, in: root),
-              let parentRect = nodeRect(at: ref.path, in: root, canvasSize: canvasSize, border: border) else {
-            return DividerInfo(ref: ref, parentPath: ref.path, originalFractions: [], children: [], usableExtent: 0, candidates: [], tolerance: 0)
-        }
-
-        let shortEdge = min(canvasSize.width, canvasSize.height)
-        let gutterPts = border.inner * shortEdge
-        let isH = ref.axis == .horizontal
-        let totalExtent = isH ? parentRect.width : parentRect.height
-        let usable = totalExtent - gutterPts * Double(children.count - 1)
-        let candidates = snapCandidates(forDividerAt: ref.path, index: ref.index, root: root, canvasSize: canvasSize, border: border)
-        let tolerance = usable > 0 ? 8.0 / usable : 0
-
-        return DividerInfo(ref: ref, parentPath: ref.path, originalFractions: fractions, children: children, usableExtent: usable, candidates: candidates, tolerance: tolerance)
     }
 
     // MARK: - Tracking -> tap / pan / swap
@@ -757,80 +911,42 @@ final class GestureController {
         let isH = info.ref.axis == .horizontal
         let deltaPoints = isH ? value.translation.width : value.translation.height
         var doc = state.document
-        applyDividerDelta(&info, deltaPoints: deltaPoints, doc: &doc)
+        let (snappedNow, floorExceededNow) = applyDividerDelta(&info, deltaPoints: deltaPoints, doc: &doc)
+        playDividerFeedback(snappedNow: snappedNow, floorExceededNow: floorExceededNow)
         doc = reclampAll(doc, canvasSize: state.canvasSize)
         state.document = doc
     }
 
     private func handleCorner(_ x: inout DividerInfo, _ y: inout DividerInfo, value: DragGesture.Value) {
         var doc = state.document
-        if x.usableExtent > 0 { applyDividerDelta(&x, deltaPoints: value.translation.width, doc: &doc) }
-        if y.usableExtent > 0 { applyDividerDelta(&y, deltaPoints: value.translation.height, doc: &doc) }
+        if x.usableExtent > 0 {
+            let (snappedNow, floorExceededNow) = applyDividerDelta(&x, deltaPoints: value.translation.width, doc: &doc)
+            playDividerFeedback(snappedNow: snappedNow, floorExceededNow: floorExceededNow)
+        }
+        if y.usableExtent > 0 {
+            let (snappedNow, floorExceededNow) = applyDividerDelta(&y, deltaPoints: value.translation.height, doc: &doc)
+            playDividerFeedback(snappedNow: snappedNow, floorExceededNow: floorExceededNow)
+        }
         doc = reclampAll(doc, canvasSize: state.canvasSize)
         state.document = doc
     }
 
-    private func applyDividerDelta(_ info: inout DividerInfo, deltaPoints: CGFloat, doc: inout Document) {
-        let deltaFraction = Double(deltaPoints) / info.usableExtent
-
-        let floor = Layout.minCellFraction
-        let f0 = info.originalFractions[info.ref.index]
-        let f1 = info.originalFractions[info.ref.index + 1]
-        let minDelta = floor - f0
-        let maxDelta = f1 - floor
-        let exceeds = deltaFraction < minDelta || deltaFraction > maxDelta
-        if exceeds && !info.floorExceeded { state.haptics.floorBump() }
-        info.floorExceeded = exceeds
-
-        let result = dragDivider(fractions: info.originalFractions, index: info.ref.index, deltaFraction: deltaFraction, snapCandidates: info.candidates, toleranceFraction: info.tolerance)
-        if result.snapped && !info.wasSnapped { state.haptics.tick() }
-        info.wasSnapped = result.snapped
-
-        let newNode = Node.split(axis: info.ref.axis, fractions: result.fractions, children: info.children)
-        doc.root = replacingNode(at: info.parentPath, in: doc.root, with: newNode)
+    /// Haptic side effect of a divider mutation - split out so both
+    /// `handleDivider` and `handleCorner`'s two (x/y) calls share it
+    /// (Justin, 2026-07-26, part of hoisting the pure math to the
+    /// `applyDividerDelta` free function above).
+    private func playDividerFeedback(snappedNow: Bool, floorExceededNow: Bool) {
+        if snappedNow { state.haptics.tick() }
+        if floorExceededNow { state.haptics.floorBump() }
     }
 
     // MARK: - Bracket (canvas ratio resize)
 
     private func handleBracket(_ info: inout BracketInfo, value: DragGesture.Value) {
-        let dx = value.translation.width
-        let dy = value.translation.height
-        var newWidth = info.originalSize.width
-        var newHeight = info.originalSize.height
-
-        switch info.corner {
-        case .topLeft: newWidth -= dx; newHeight -= dy
-        case .topRight: newWidth += dx; newHeight -= dy
-        case .bottomLeft: newWidth -= dx; newHeight += dy
-        case .bottomRight: newWidth += dx; newHeight += dy
-        }
-        newWidth = max(newWidth, 120)
-        newHeight = max(newHeight, 120)
-
-        var ratioValue = newWidth / newHeight
-        var snappedIndex: Int?
-        for (i, preset) in ratioPresets.enumerated() {
-            let presetValue = preset.w / preset.h
-            if abs(log(ratioValue) - log(presetValue)) < 0.035 {
-                snappedIndex = i
-                ratioValue = presetValue
-                break
-            }
-        }
-        if info.snappedPresetIndex == nil, snappedIndex != nil {
-            state.haptics.tick()
-        }
-        info.snappedPresetIndex = snappedIndex
-
-        let finalRatio: Ratio
-        if let idx = snappedIndex {
-            finalRatio = Ratio(width: ratioPresets[idx].w, height: ratioPresets[idx].h)
-        } else {
-            finalRatio = Ratio(width: newWidth, height: newHeight)
-        }
-
-        state.document.canvasRatio = finalRatio
-        state.liveCanvasSize = CGSize(width: newWidth, height: newHeight)
+        let result = applyBracketDelta(&info, translation: value.translation)
+        if result.snappedNow { state.haptics.tick() }
+        state.document.canvasRatio = result.ratio
+        state.liveCanvasSize = result.liveSize
     }
 
     private func endBracket(_ info: BracketInfo) {

@@ -1,8 +1,8 @@
 // Sources/App/Library/PickerView.swift
-// Full-screen dark photo picker: album menu, 4-column square grid, 2-4
-// unordered selection, and the pick-completion flow that builds a Document
-// (template + content-fit assignment + per-photo auto-framing) ready to hand
-// to EditorState.
+// Full-screen dark photo picker: album menu, pinch-to-resize square grid
+// (3-column default), 2-4 unordered selection, and the pick-completion flow
+// that builds a Document (template + content-fit assignment + per-photo
+// auto-framing) ready to hand to EditorState.
 import SwiftUI
 import Photos
 import PhotosUI
@@ -29,12 +29,38 @@ final class PickerState {
 
     private(set) var albums: [PhotoLibraryService.AlbumInfo] = []
     private(set) var selectedAlbum: PhotoLibraryService.AlbumInfo?
-    private(set) var assets: PHFetchResult<PHAsset> = PHFetchResult()
+    private(set) var assets: PHFetchResult<PHAsset> = PHFetchResult() {
+        didSet {
+            // Materialized ONCE per fetch here, never in a view body
+            // (2026-07-26 perf fix - see the grid's doc comment): the array
+            // is what ForEach iterates, keyed by each asset's stable
+            // localIdentifier.
+            var result: [PHAsset] = []
+            result.reserveCapacity(assets.count)
+            assets.enumerateObjects { asset, _, _ in result.append(asset) }
+            gridAssets = result
+        }
+    }
+    /// Plain-array mirror of `assets` for `ForEach` - kept in lockstep by
+    /// `assets`'s `didSet`.
+    private(set) var gridAssets: [PHAsset] = []
 
-    /// Unordered - a Set would lose deterministic grid redraw order, so this
-    /// stays an Array, but nothing in the UI numbers the selections.
+    /// A Set would lose deterministic grid redraw order, so this stays an
+    /// Array - and as of the grid's big centered pick-order number (Justin,
+    /// 2026-07-26, see `selectionOrder(_:)`), insertion order IS the number
+    /// shown, not just an implementation detail.
     private(set) var selectedAssetIDs: [String] = []
     var pulseNextBadge = false
+
+    /// Splash-to-picker launch animation (Justin, 2026-07-26): true once the
+    /// arrival animation has played for this app process. `PickerState` for
+    /// `.pick` mode is created once and lives for ContentView's whole
+    /// lifetime (see MosaicApp.swift), so this flag survives the picker
+    /// disappearing/reappearing as the editor opens and closes - exactly
+    /// the "first appearance only" guard `PickerView.init` needs. A fresh
+    /// `.replace`-mode PickerState is built per sheet presentation, but
+    /// that mode never plays the animation regardless (gated in `init`).
+    private(set) var hasPlayedLaunchAnimation = false
 
     var isLoading = false
     var loadingMessage = "Preparing…"
@@ -90,6 +116,29 @@ final class PickerState {
     // MARK: - Selection
 
     func isSelected(_ assetID: String) -> Bool { selectedAssetIDs.contains(assetID) }
+
+    /// 1-based pick order, for the grid cell's big centered number - nil
+    /// when unselected. Unordered per the note on `selectedAssetIDs` above,
+    /// but the array's insertion order IS the pick order, so this is just
+    /// its index.
+    func selectionOrder(_ assetID: String) -> Int? {
+        guard let idx = selectedAssetIDs.firstIndex(of: assetID) else { return nil }
+        return idx + 1
+    }
+
+    /// Called once, synchronously, from `PickerView.init` on the picker's
+    /// first appearance this process - see `hasPlayedLaunchAnimation`.
+    func markLaunchAnimationPlayed() {
+        hasPlayedLaunchAnimation = true
+    }
+
+    /// Dev Tools "Replay first-run experience" (Justin, 2026-07-26): re-arms
+    /// the one-per-process guard above so `PickerView` can re-stage the
+    /// welcome choreography in-place, without relaunching the app. See
+    /// `PickerView.replayFirstRunExperience()`.
+    func resetLaunchAnimationFlag() {
+        hasPlayedLaunchAnimation = false
+    }
 
     func toggleSelection(_ assetID: String) {
         if let idx = selectedAssetIDs.firstIndex(of: assetID) {
@@ -214,7 +263,11 @@ final class PickerState {
         let candidateTemplates = templates(for: idsInOrder)
         let chosenTemplate = candidateTemplates[min(defaultIndex, candidateTemplates.count - 1)]
 
-        let border = BorderStyle(inner: 0.01, outer: 0, linked: true, cornerRadius: 0, color: .white)
+        // A fresh collage starts with a genuinely zero border (Justin,
+        // 2026-07-26): photos arrive touching, matching the Border tray's
+        // slider at 0. Zero here (not stripped later) so content-fit and
+        // auto-framing solve against the exact cell rects the editor shows.
+        let border = BorderStyle(inner: 0, outer: 0, linked: true, cornerRadius: 0, color: .white)
         let nominalCanvas = CGSize(width: 1000, height: 1000)
 
         let assigned = contentFitAssignment(photoSizes: pixelSizes, template: chosenTemplate, canvasSize: nominalCanvas, border: border)
@@ -263,11 +316,27 @@ final class PickerState {
 
 struct PickerView: View {
     @State var state: PickerState
+    /// B28's settings ingress (gear icon, Screen A header) needs entitlement
+    /// state for its Remove Watermark row - owned upstream (ContentView) and
+    /// threaded through, same as every other state object in this app.
+    var storeService: StoreService
     /// `.pick` mode's completion: a whole new Document + its images.
     var onConfirmed: (Document, [PhotoID: UIImage]) -> Void = { _, _ in }
     /// `.replace` mode's completion (Phase 4): the single freshly-loaded
     /// asset, handed to `EditorState.replace(photoID:image:pixelSize:...)`.
     var onReplaceConfirmed: ((UIImage, CGSize, PHAsset?) -> Void)? = nil
+    /// Nothing-is-destructive navigation (Justin, 2026-07-26): whether
+    /// `current.json` exists - shows the "Continue current collage" entry
+    /// point below the header when true, ABOVE "Edit last collage". Current
+    /// and last can now coexist (backing out of the editor no longer deletes
+    /// current.json), so both rows may show at once. Left `false` (the
+    /// default) for the `.replace`-mode picker EditorView presents as a
+    /// sheet, same reasoning as `hasLastCollage` below.
+    var hasCurrentCollage: Bool = false
+    /// Tapping "Continue current collage" - the caller (ContentView) restores
+    /// current.json straight into the editor (no promotion needed; it's
+    /// already current).
+    var onContinueCurrent: (() -> Void)? = nil
     /// Phase 6 persistence: whether `last.json` exists - shows the "Edit
     /// last collage" entry point below the header when true. Left `false`
     /// (the default) for the `.replace`-mode picker EditorView presents as a
@@ -279,29 +348,205 @@ struct PickerView: View {
 
     @State private var showAlbumMenu = false
     @State private var showFallbackPicker = false
+    @State private var showSettings = false
+    /// Dev Tools entry (Justin, 2026-07-26) - see `DevSheet.swift`.
+    @State private var showDevSheet = false
+
+    /// First-run welcome (Justin, 2026-07-26, full-screen revision): shown
+    /// exactly once per install, gated by this flag - see `LaunchPhase` and
+    /// `runLaunchChoreographyIfNeeded()` for the timing (it's now folded
+    /// into the splash-to-picker choreography itself, not a modal shown
+    /// after it settles).
+    @AppStorage("hasSeenWelcome") private var hasSeenWelcome: Bool = false
+
+    /// Pinch-to-resize grid density (Justin, 2026-07-26 rework): 1-5 columns,
+    /// default 3 (was a 3/4/5 tap control defaulting to 4 - see `pinchToResizeGesture`
+    /// and `grid` below, replacing the old `ColumnCountControl`). Everything
+    /// the grid draws per cell (`GridThumbnail`) is geometry-driven off its
+    /// own `GeometryReader`, so changing this needs no other math to change
+    /// anywhere.
+    @AppStorage("pickerColumns") private var pickerColumns: Int = 3
+
+    /// Pinch-gesture accumulator (Justin, 2026-07-26): `MagnificationGesture`
+    /// reports its value cumulatively from the moment two fingers touch down,
+    /// not as a per-frame delta - so to let one long pinch step through
+    /// several column counts, this tracks the gesture value at the last step
+    /// and measures each `onChanged` tick RELATIVE to it, resetting after
+    /// every step (and back to 1.0 when the gesture ends). See
+    /// `pinchToResizeGesture`.
+    @State private var pinchStepAnchor: CGFloat = 1.0
+
+    /// Collapsing hero header (Justin, 2026-07-26): raw vertical content
+
+    /// Splash-to-picker launch, folded together with the first-run welcome
+    /// (Justin, 2026-07-26). `.initial`: the oversized lockup, alone and
+    /// centered on the empty background - the shared first moment for both
+    /// a returning launch and a first-run welcome. From there:
+    ///   - Returning (`hasSeenWelcome` already true): holds briefly, then
+    ///     springs straight to `.arrived` (the real masthead/header/grid
+    ///     layout) - exactly the original splash behavior, no text, no
+    ///     button.
+    ///   - First run (`hasSeenWelcome` false): `.welcomeText` fades in the
+    ///     three teaching rows below the lockup, then `.welcomeReady` fades
+    ///     in the "Get started" button below that. `.welcomeReady` HOLDS -
+    ///     no timeout - until the button is tapped, which sets
+    ///     `hasSeenWelcome` and springs to `.arrived` in the same motion
+    ///     (see `getStarted()`).
+    /// Reduce Motion skips straight to the settled state for either path:
+    /// returning users land on `.arrived` immediately; first-run users land
+    /// on `.welcomeReady` immediately (lockup + rows + button all present,
+    /// no staged fades), and tapping "Get started" cuts straight to
+    /// `.arrived` with no spring.
+    /// Decided once, in `init`, from `hasPlayedLaunchAnimation`,
+    /// `hasSeenWelcome`, and Reduce Motion - see there for why it must be
+    /// decided synchronously rather than in `.task`.
+    private enum LaunchPhase {
+        case initial
+        case welcomeText
+        case welcomeReady
+        case arrived
+    }
+
+    @State private var launchPhase: LaunchPhase
+    /// Ties the oversized welcome-stage lockup to the real masthead lockup so
+    /// the position/scale change reads as one element moving, not a
+    /// crossfade between two - see `welcomeStage` and `masthead`.
+    @Namespace private var lockupNamespace
 
     private let backgroundColor = Color(red: 0.043, green: 0.043, blue: 0.051)
 
-    var body: some View {
-        VStack(spacing: 0) {
-            if state.mode == .pick {
-                masthead
-            }
-            header
-            // Shown regardless of photo-library authorization state (unlike
-            // the grid/denied/loading `content` below): resuming a
-            // previously-saved document never needs a NEW pick, so this
-            // shouldn't be gated behind permission resolution - a user who
-            // hasn't granted (or has denied) photo access can still get back
-            // into their last collage.
-            if hasLastCollage, state.mode == .pick {
-                editLastCollageBanner
-            }
-            content
+    /// Disabled floating-CTA fill (Justin, 2026-07-26): a flat, fully OPAQUE
+    /// dark grey - deliberately not `Color.mosaicSurface`, which sits too
+    /// close to `backgroundColor` to read as a solid card over photos
+    /// scrolling underneath it. No material, no alpha blend with what's
+    /// behind - see `floatingNextButton`.
+    private let ctaDisabledFill = Color(red: 0.176, green: 0.176, blue: 0.184)
+
+    /// Hero header sizing (Justin, 2026-07-26 collapsing-header rework): the
+    /// lockup sits at `mastheadHeroLockupHeight` at rest and shrinks to
+    /// `mastheadCompactLockupHeight` (today's original masthead size) once
+    /// the grid has scrolled `heroCollapseDistance` points - see
+    /// `heroCollapseProgress` and `masthead`.
+    private let mastheadCompactLockupHeight: CGFloat = 30
+    private let mastheadHeroLockupHeight: CGFloat = 56
+    private let heroCollapseDistance: CGFloat = 60
+
+    /// Custom init (replaces the synthesized memberwise one) so the launch
+    /// phase can be decided before the first frame renders. Parameter order
+    /// mirrors the original property order exactly - both call sites
+    /// (ContentView.swift, EditorView.swift) rely on skipping defaulted
+    /// params out of position, which only works if this matches.
+    init(
+        state: PickerState,
+        storeService: StoreService,
+        onConfirmed: @escaping (Document, [PhotoID: UIImage]) -> Void = { _, _ in },
+        onReplaceConfirmed: ((UIImage, CGSize, PHAsset?) -> Void)? = nil,
+        hasCurrentCollage: Bool = false,
+        onContinueCurrent: (() -> Void)? = nil,
+        hasLastCollage: Bool = false,
+        onEditLastCollage: (() -> Void)? = nil
+    ) {
+        _state = State(initialValue: state)
+        self.storeService = storeService
+        self.onConfirmed = onConfirmed
+        self.onReplaceConfirmed = onReplaceConfirmed
+        self.hasCurrentCollage = hasCurrentCollage
+        self.onContinueCurrent = onContinueCurrent
+        self.hasLastCollage = hasLastCollage
+        self.onEditLastCollage = onEditLastCollage
+
+        // Read the "have we ever played this" flag BEFORE marking it -
+        // that decides whether THIS appearance animates at all. Mark it
+        // played synchronously right here (not after the animation
+        // finishes) so a later PickerView init for the very same
+        // PickerState (returning from the editor swaps EditorView back out,
+        // same `.pick` PickerState instance persists on ContentView) can
+        // never re-arm it, even if Reduce Motion is toggled mid-process.
+        let isFreshProcessAppearance = state.mode == .pick && !state.hasPlayedLaunchAnimation
+        let reduceMotion = UIAccessibility.isReduceMotionEnabled
+        // Read the UserDefaults value directly rather than through
+        // `@AppStorage` - `self` isn't fully initialized yet at this point
+        // in a custom init, but a plain UserDefaults read doesn't touch
+        // `self` at all, so it's safe here (same key `hasSeenWelcome` reads/
+        // writes through afterward).
+        let neverSeenWelcome = state.mode == .pick && !UserDefaults.standard.bool(forKey: "hasSeenWelcome")
+        if state.mode == .pick {
+            state.markLaunchAnimationPlayed()
         }
-        .background(backgroundColor.ignoresSafeArea())
+
+        if !isFreshProcessAppearance {
+            // Every appearance after the very first one this process (or
+            // `.replace` mode, which never animates) - straight to settled.
+            _launchPhase = State(initialValue: .arrived)
+        } else if reduceMotion {
+            // First appearance this process, but no animation: land
+            // immediately on whichever HOLD state is correct for this
+            // install - `.welcomeReady` (lockup+rows+button, all static) if
+            // this is a first run, else straight past the welcome to
+            // `.arrived`.
+            _launchPhase = State(initialValue: neverSeenWelcome ? .welcomeReady : .arrived)
+        } else {
+            // The one case that actually animates: start at the shared
+            // `.initial` moment: `runLaunchChoreographyIfNeeded()` stages
+            // the rest, branching on `hasSeenWelcome`.
+            _launchPhase = State(initialValue: .initial)
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            backgroundColor.ignoresSafeArea()
+
+            // Splash-to-picker launch, folded with the first-run welcome
+            // (Justin, 2026-07-26): the oversized lockup - and, on a first
+            // run, the teaching rows and "Get started" button beneath it -
+            // sit here, centered on the empty background, for every phase
+            // except `.arrived` - see LaunchPhase.
+            if launchPhase != .arrived {
+                welcomeStage
+            }
+
+            VStack(spacing: 0) {
+                if state.mode == .pick {
+                    masthead
+                }
+                // Header/banner/grid group springs up + fades in together
+                // with the masthead's lockup landing (one coordinated
+                // transaction - see `runLaunchChoreographyIfNeeded` and
+                // `getStarted`). Outside the launch window this offset/
+                // opacity pair is just (0, 1) - a no-op.
+                Group {
+                    header
+                    // Shown regardless of photo-library authorization state
+                    // (unlike the grid/denied/loading `content` below):
+                    // resuming a previously-saved document never needs a
+                    // NEW pick, so this shouldn't be gated behind
+                    // permission resolution - a user who hasn't granted (or
+                    // has denied) photo access can still get back into
+                    // their last collage.
+                    // Both rows may show at once now that backing out of the
+                    // editor no longer discards current.json (Justin,
+                    // 2026-07-26) - "Continue current" sits above "Edit last"
+                    // since it's the more recent, more likely-wanted thread.
+                    if hasCurrentCollage, state.mode == .pick {
+                        continueCurrentCollageBanner
+                    }
+                    if hasLastCollage, state.mode == .pick {
+                        editLastCollageBanner
+                    }
+                    content
+                }
+                .offset(y: launchPhase == .arrived ? 0 : 80)
+                .opacity(launchPhase == .arrived ? 1 : 0)
+            }
+        }
         .foregroundStyle(.white)
         .task { await state.onAppear() }
+        // Independent of the `.task` above: photo-permission prompts and
+        // library loading must never wait on this beat+spring+welcome-hold,
+        // so it's its own child task rather than sequenced after
+        // `onAppear()`.
+        .task { await runLaunchChoreographyIfNeeded() }
         .sheet(isPresented: $showFallbackPicker) {
             SystemPhotoPicker(selectionLimit: state.effectiveSelectionLimit) { picks in
                 for pick in picks { state.addFallbackPick(image: pick.0, pixelSize: pick.1) }
@@ -313,7 +558,29 @@ struct PickerView: View {
                 loadingOverlay
             }
         }
+        .overlay(alignment: .bottom) {
+            // Hidden until the splash/welcome settles - the always-present
+            // CTA otherwise peeks through the bottom of the first-run
+            // welcome screen (caught in the 2026-07-26 review pass).
+            if launchPhase == .arrived {
+                floatingNextButton
+            }
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsSheet(storeService: storeService, onDismiss: { showSettings = false })
+        }
+        .sheet(isPresented: $showDevSheet) {
+            // Dev Tools (Justin, 2026-07-26) - ships in Release FOR NOW, see
+            // `DevSheet.swift`'s header comment.
+            DevSheet(
+                onReplayFirstRun: replayFirstRunExperience,
+                onClearCollages: { DocumentStore.resetAll() },
+                onDismiss: { showDevSheet = false }
+            )
+        }
     }
+
+    // MARK: - Splash-to-picker + first-run welcome choreography (Justin, 2026-07-26)
 
     private func confirmAndDeliver() async {
         switch state.mode {
@@ -328,31 +595,248 @@ struct PickerView: View {
         }
     }
 
+    /// Holds the oversized centered lockup for a beat, then stages whichever
+    /// path `init` decided this appearance should take. `guard launchPhase
+    /// == .initial` makes this a no-op on every appearance after the first
+    /// (or under Reduce Motion, or in `.replace` mode) - `init` already
+    /// resolved those synchronously to their settled state.
+    ///
+    /// Grand-entrance rework (Justin, 2026-07-26): every hold roughly
+    /// doubled from the original splash timing, and the lockup now gets a
+    /// full 1.2s alone before anything else appears - a real title-sequence
+    /// beat rather than a blink-and-you-miss-it pause. The rows themselves
+    /// don't fade in as one block anymore: `WelcomeInstructionRows` stages
+    /// each row on its own ~0.6s-staggered delay once `isRevealed` flips
+    /// (see that view), so the second hold below is sized to let the LAST
+    /// (fourth, on-device-AI) row finish landing before "Get started"
+    /// appears underneath them.
+    private func runLaunchChoreographyIfNeeded() async {
+        guard launchPhase == .initial else { return }
+        if hasSeenWelcome {
+            // Returning user: the original splash - brief hold, then spring
+            // straight to the settled picker.
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard launchPhase == .initial else { return } // a dev-tools replay may have moved it
+            withAnimation(.spring(response: 0.7, dampingFraction: 0.85)) {
+                launchPhase = .arrived
+            }
+        } else {
+            // First run: a full beat alone with the (now larger) lockup,
+            // then the teaching rows stagger in beneath it, then (once
+            // they've all landed) the CTA fades in at the BOTTOM of the
+            // screen. `.welcomeReady` HOLDS from there - no further timer,
+            // see `getStarted()`.
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            guard launchPhase == .initial else { return }
+            withAnimation(.easeOut(duration: 0.6)) {
+                launchPhase = .welcomeText
+            }
+            // ~0.6s stagger x 4 rows + each row's own fade duration - timed
+            // to clear the last (AI) row before the CTA shows up.
+            try? await Task.sleep(nanoseconds: 2_400_000_000)
+            guard launchPhase == .welcomeText else { return }
+            withAnimation(.easeOut(duration: 0.6)) {
+                launchPhase = .welcomeReady
+            }
+        }
+    }
+
+    /// "Get started" - the button IS the welcome screen's dismissal. Sets
+    /// `hasSeenWelcome` and triggers the EXISTING splash-to-picker spring in
+    /// the same motion, so the welcome screen and the picker's arrival read
+    /// as one continuous choreography rather than two separate animations.
+    /// Spring slowed slightly (0.7 -> 0.9 response, Justin 2026-07-26) to
+    /// match the rest of the grand-entrance rework's more deliberate pace,
+    /// while staying the same one-motion spring it always was. Reduce
+    /// Motion cuts straight to `.arrived` with no spring.
+    private func getStarted() {
+        hasSeenWelcome = true
+        if UIAccessibility.isReduceMotionEnabled {
+            launchPhase = .arrived
+        } else {
+            withAnimation(.spring(response: 0.9, dampingFraction: 0.85)) {
+                launchPhase = .arrived
+            }
+        }
+    }
+
+    /// Dev Tools "Replay first-run experience" (Justin, 2026-07-26): clears
+    /// `hasSeenWelcome` plus the other two onboarding flags EditorView owns
+    /// (`hasSeenCoachMarks`, `hasSeenEditor` - reset here as plain
+    /// UserDefaults keys since this file doesn't own EditorView.swift), then
+    /// re-arms this process's launch-animation guard and rewinds
+    /// `launchPhase` back to the welcome screen's start so the choreography
+    /// re-runs immediately - no relaunch needed to see it. Coach marks and
+    /// the editor's auto-selected first cell still need a fresh Editor
+    /// entry to actually replay (their flags are read fresh there), which
+    /// `DevSheet`'s footer copy is honest about.
+    private func replayFirstRunExperience() {
+        hasSeenWelcome = false
+        UserDefaults.standard.removeObject(forKey: "hasSeenCoachMarks")
+        UserDefaults.standard.removeObject(forKey: "hasSeenEditor")
+        state.resetLaunchAnimationFlag()
+        launchPhase = UIAccessibility.isReduceMotionEnabled ? .welcomeReady : .initial
+        showDevSheet = false
+        Task { await runLaunchChoreographyIfNeeded() }
+    }
+
     // MARK: Masthead (branding + instruction, Justin 2026-07-17)
 
-    /// Reserved brand space on Screen A's fresh/new state: the wordmark and
-    /// a single instruction line. Deliberately quiet - copy, not a tutorial
+    /// Brand lockup (Justin, 2026-07-26) - replaces the tracked-out MOSAIC
+    /// wordmark. Shared between the final masthead position and the
+    /// oversized welcome-stage placement (`welcomeStage`) - the two `.frame`
+    /// heights plus `matchedGeometryEffect` are what let one lockup read as
+    /// sliding/scaling between them instead of crossfading.
+    private var lockupImage: some View {
+        Image("Lockup")
+            .resizable()
+            .scaledToFit()
+            .accessibilityLabel("Mosaic")
+    }
+
+    /// Splash-to-picker launch + first-run welcome, one screen (Justin,
+    /// 2026-07-26 grand-entrance rework): the lockup at ~2.2x the masthead's
+    /// resting height (30pt -> 66pt, up from the original 1.6x/48pt), front
+    /// and center, for every phase except `.arrived` - disappears the instant
+    /// the real masthead lockup (tagged with the same namespace id) takes
+    /// over, shrinking further from there as `masthead`'s own hero size
+    /// settles in. On a first run the teaching rows stagger in below it as
+    /// `launchPhase` advances to `.welcomeText`, then "Get started" appears
+    /// pinned to the BOTTOM of the screen - same position/size class as the
+    /// picker's persistent floating CTA (`floatingNextButton`), not a
+    /// mid-screen button - once `launchPhase` reaches `.welcomeReady`. On a
+    /// returning launch neither ever shows since `launchPhase` skips
+    /// straight from `.initial` to `.arrived` (see
+    /// `runLaunchChoreographyIfNeeded`). Hit-testing is on only for the
+    /// button itself - the lockup and rows stay `allowsHitTesting(false)`
+    /// like the old splash lockup did.
+    private var welcomeStage: some View {
+        ZStack {
+            VStack(spacing: 28) {
+                Spacer()
+                lockupImage
+                    .frame(height: mastheadCompactLockupHeight * 2.2)
+                    .matchedGeometryEffect(id: "lockup", in: lockupNamespace)
+                    .allowsHitTesting(false)
+
+                // Present the whole time (not just at `.welcomeText`/
+                // `.welcomeReady`) so each row's own staggered `.animation`
+                // has a real false -> true transition to animate through -
+                // see `WelcomeInstructionRows.isRevealed`. Invisible and
+                // inert until then, so this is a no-op for returning users,
+                // who never leave `.initial` before jumping to `.arrived`.
+                WelcomeInstructionRows(isRevealed: launchPhase != .initial)
+                    .allowsHitTesting(false)
+
+                Spacer()
+            }
+            .padding(.horizontal, 36)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // "Get started" now lives at the bottom of the screen, matching
+            // the floating CTA's own position/size class exactly (80%-width
+            // capsule, 16pt above the safe-area bottom) - see
+            // `floatingNextButton`.
+            if launchPhase == .welcomeReady {
+                VStack {
+                    Spacer()
+                    WelcomeGetStartedButton(action: getStarted)
+                        .containerRelativeFrame(.horizontal) { width, _ in width * 0.8 }
+                        .padding(.bottom, 16)
+                        .transition(.opacity)
+                }
+            }
+        }
+    }
+
+    /// Reserved brand space at the top of the picker: the wordmark and a
+    /// single instruction line. Deliberately quiet - copy, not a tutorial
     /// (the PRD's no-tutorials rule stands; the gesture grammar still
     /// teaches itself in the editor).
+    ///
+    /// Collapsing hero header (Justin, 2026-07-26): at rest this is a real
+    /// branding moment - the lockup at `mastheadHeroLockupHeight` with
+    /// generous vertical padding - that smoothly shrinks to a compact bar
+    /// (`mastheadCompactLockupHeight`, today's original size) as the grid
+    /// scrolls, driven continuously by `heroCollapseProgress` off the
+    /// ScrollView's live offset (see `grid`'s `onScrollGeometryChange`), the
+    /// same way a native large-title nav bar collapses - not a discrete
+    /// toggle, so it tracks the finger 1:1 and un-collapses just as smoothly
+    /// scrolling back to the top. The instruction line fades and shrinks
+    /// away as it collapses, reappearing at rest.
+    ///
+    /// The Dev Tools icon now lives in this hero area's top-right corner
+    /// (Justin, 2026-07-26) rather than the album header row - anchored via
+    /// `.overlay` to the OUTER frame (whose top edge never moves as the
+    /// inner content shrinks), so it stays put in the same corner through
+    /// the whole collapse.
+    ///
+    /// While `launchPhase != .arrived` the real lockup isn't here yet -
+    /// `welcomeStage` owns it - so a clear spacer holds the hero's height
+    /// and the instruction line stays invisible; both settle in together
+    /// when the phase reaches `.arrived`.
+    /// FIXED height, deliberately (Justin, 2026-07-27 - the tap-drift bug).
+    /// This masthead sits in a VStack ABOVE the grid's ScrollView, so any
+    /// change to its height moves the ScrollView's frame and slides every
+    /// grid cell vertically on screen. The old scroll-driven collapse shrank
+    /// it by ~72pt total (lockup 26 + paddings 30 + subtitle 16) DURING the
+    /// first 60pt of scroll - i.e. exactly while a finger was down near the
+    /// top of the grid - so a tap that started over one photo resolved over
+    /// the next one down/along. That is the "wrong photo gets selected"
+    /// report, and it was intermittent precisely because it only bit inside
+    /// the collapse window. Nothing here may depend on scroll position
+    /// again unless the hero moves INSIDE the ScrollView as scroll content.
     private var masthead: some View {
         VStack(spacing: 6) {
-            Text("MOSAIC")
-                .font(.system(size: 22, weight: .bold))
-                .tracking(6)
-                .foregroundStyle(Color.mosaicAccent)
+            if launchPhase == .arrived {
+                lockupImage
+                    .frame(height: mastheadHeroLockupHeight)
+                    .matchedGeometryEffect(id: "lockup", in: lockupNamespace)
+            } else {
+                Color.clear.frame(height: mastheadHeroLockupHeight)
+            }
             Text("Choose 2-4 photos below")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Color.white.opacity(0.55))
+                .opacity(launchPhase == .arrived ? 1 : 0)
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 18)
-        .padding(.bottom, 14)
+        .padding(.top, 28)
+        .padding(.bottom, 20)
+        // No `.pick`-mode guard needed here - `masthead` itself is only ever
+        // shown in `.pick` mode (see `body` above).
+        .overlay(alignment: .topTrailing) {
+            devToolsButton
+        }
     }
 
     // MARK: Header
 
+    /// Next used to live here (trailing, "Next (N)"/"Replace"); it's now a
+    /// floating CTA over the grid instead - see `floatingNextButton`
+    /// (Justin, 2026-07-26). The thumbnail-size control and the Dev Tools
+    /// icon that used to live at the trailing end have both moved off this
+    /// row (Justin, 2026-07-26 rework): sizing is now a pinch gesture on the
+    /// grid itself (see `pinchToResizeGesture`) and Dev Tools now sits in
+    /// the hero header's top-right corner (see `masthead`/`devToolsButton`)
+    /// - so this row is just the settings gear and the album menu now, the
+    /// trailing `Spacer` kept purely to hold the row left-weighted.
     private var header: some View {
-        HStack {
+        HStack(spacing: 4) {
+            // B28: the reserved settings ingress - only in `.pick` mode; the
+            // `.replace`-mode picker EditorView presents as a sheet has no
+            // chrome budget for it and nothing to settle mid-replace.
+            if state.mode == .pick {
+                Button {
+                    showSettings = true
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .frame(width: 36, height: 36)
+                }
+            }
+
             Menu {
                 ForEach(state.albums) { album in
                     Button {
@@ -372,21 +856,143 @@ struct PickerView: View {
             }
 
             Spacer()
-
-            Button {
-                Task { await confirmAndDeliver() }
-            } label: {
-                Text(state.mode == .replace ? "Replace" : "Next (\(state.selectionCount))")
-                    .font(.headline)
-            }
-            .disabled(!state.canConfirm)
-            .foregroundStyle(state.canConfirm ? Color.mosaicAccent : Color.white.opacity(0.3))
-            .scaleEffect(state.pulseNextBadge ? 1.15 : 1.0)
-            .animation(.spring(response: 0.25, dampingFraction: 0.5), value: state.pulseNextBadge)
         }
         .padding(.horizontal, 16)
         .frame(height: 52)
         .background(Color.white.opacity(0.06))
+    }
+
+    /// Dev Tools entry (Justin, 2026-07-26): moved from a hammer icon on the
+    /// header row to a quiet "ellipsis.circle" glyph in the hero header's
+    /// top-right corner (see `masthead`), safe-area padded. `.pick`-only,
+    /// same reasoning as the settings gear. Ships in Release FOR NOW - see
+    /// DevSheet.swift's header comment.
+    private var devToolsButton: some View {
+        Button {
+            showDevSheet = true
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white.opacity(0.4))
+                .frame(width: 36, height: 36)
+        }
+        .padding(.top, 4)
+        .padding(.trailing, 16)
+    }
+
+    // MARK: Pinch-to-resize grid (Justin, 2026-07-26)
+
+    /// Replaces the old tap-driven `ColumnCountControl`: pinch the grid
+    /// itself, Photos-app style - pinch IN (fingers together, magnification
+    /// shrinking) shows MORE, smaller columns (4, then 5); pinch OUT
+    /// (spreading, magnification growing) shows FEWER, bigger columns (2,
+    /// then 1), clamped 1...5. `MagnificationGesture.onChanged` reports its
+    /// value cumulatively from gesture start, not as a delta, so a single
+    /// long pinch measures each tick relative to `pinchStepAnchor` (the
+    /// value at the last step) rather than the gesture's true start -
+    /// resetting that anchor after every step is what lets one continuous
+    /// pinch walk through several sizes instead of firing once. Thresholds
+    /// (1.3x / 0.77x, reciprocal of each other) are the same "does this feel
+    /// like a deliberate step" balance the Photos app itself uses. Attached
+    /// via `.simultaneousGesture` on the grid content (not the ScrollView)
+    /// so it never steals the scroll drag or a cell's own tap gesture.
+    private var pinchToResizeGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                let relative = value / pinchStepAnchor
+                if relative >= 1.3 {
+                    stepColumns(by: -1)
+                    pinchStepAnchor = value
+                } else if relative <= 0.77 {
+                    stepColumns(by: 1)
+                    pinchStepAnchor = value
+                }
+            }
+            .onEnded { _ in
+                pinchStepAnchor = 1.0
+            }
+    }
+
+    /// Steps `pickerColumns` by `delta`, clamped 1...5, with a quick
+    /// re-layout animation and a light tap of haptic feedback per step
+    /// (Justin, 2026-07-26) - every per-cell measurement (`GridThumbnail`'s
+    /// selection overlay, its 40%-of-height number, the radial gradient
+    /// radius) reads off its own `GeometryReader`, so nothing else needs to
+    /// change when this does.
+    private func stepColumns(by delta: Int) {
+        let newValue = min(5, max(1, pickerColumns + delta))
+        guard newValue != pickerColumns else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(.easeInOut(duration: 0.25)) {
+            pickerColumns = newValue
+        }
+    }
+
+    // MARK: Persistent instructive CTA (Justin, 2026-07-26)
+
+    /// Replaces the old header-row Next button AND the earlier
+    /// appear/disappear floating capsule: this one is ALWAYS present while
+    /// the picker is up, narrating the selection state instead of just
+    /// gating on it - "clearly present but clearly inert" until the
+    /// selection is valid. Existence is no longer the enablement signal;
+    /// `state.canConfirm` now only toggles fill/border/text color and
+    /// whether the button responds to taps. Same `confirmAndDeliver()`
+    /// action either way, unreachable while disabled since `.disabled` on a
+    /// `.plain`-styled button blocks the tap without adding its own dimming
+    /// (this view already owns the muted-color look for the disabled state).
+    /// Disabled fill is a flat, fully OPAQUE dark grey (Justin, 2026-07-26) -
+    /// `ctaDisabledFill`, not a material or a border-plus-translucent-surface
+    /// combo, so photos scrolling underneath the capsule never show through
+    /// it. No border needed at that contrast, so the old hairline stroke is
+    /// gone too.
+    private var floatingNextButton: some View {
+        Button {
+            Task { await confirmAndDeliver() }
+        } label: {
+            Text(ctaLabel)
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(state.canConfirm ? Color.white : Color.white.opacity(0.45))
+                .frame(maxWidth: .infinity)
+                .frame(height: 54)
+                // Deep accent when enabled (real contrast for the white
+                // label); flat opaque grey when disabled - both fully solid
+                // fills, no material/border on either.
+                .background(state.canConfirm ? Color.mosaicAccentDeep : ctaDisabledFill, in: Capsule())
+                .shadow(color: .black.opacity(state.canConfirm ? 0.4 : 0), radius: 14, y: 6)
+        }
+        // NOT `.disabled()` (Justin, 2026-07-27): SwiftUI dims a disabled
+        // button's ENTIRE rendering, including the opaque capsule fill, so
+        // the inactive CTA still read as see-through with photos visible
+        // through it - the exact thing the opaque `ctaDisabledFill` was
+        // meant to fix. Blocking hit-testing instead keeps the fill fully
+        // solid; the muted label color above is the only "disabled" cue.
+        .allowsHitTesting(state.canConfirm)
+        .buttonStyle(.plain)
+        // 80% of screen width (Justin, 2026-07-26) - containerRelativeFrame
+        // reads the ZStack root's width rather than needing a GeometryReader
+        // of its own.
+        .containerRelativeFrame(.horizontal) { width, _ in width * 0.8 }
+        .padding(.bottom, 16)
+        .animation(.easeInOut(duration: 0.2), value: state.canConfirm)
+        .animation(.easeInOut(duration: 0.2), value: ctaLabel)
+    }
+
+    /// Selection-count narration for the CTA above. `.pick`: 0 -> prompt to
+    /// choose 2-4, 1 -> prompt for "1 more" (the common near-miss), 2-4 ->
+    /// "Next (N)". `.replace`: 0 -> prompt, exactly 1 -> "Replace". The
+    /// 5th-tap-rejected case never reaches here since the cap keeps
+    /// `selectionCount` at 4.
+    private var ctaLabel: String {
+        switch state.mode {
+        case .pick:
+            switch state.selectionCount {
+            case 0: return "Choose 2-4 photos"
+            case 1: return "Choose 1 more"
+            default: return "Next (\(state.selectionCount))"
+            }
+        case .replace:
+            return state.canConfirm ? "Replace" : "Choose a photo"
+        }
     }
 
     // MARK: Content per permission state
@@ -409,6 +1015,30 @@ struct PickerView: View {
         @unknown default:
             ProgressView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// Nothing-is-destructive navigation (Justin, 2026-07-26): shown
+    /// whenever `current.json` exists - the editor's back button lands here
+    /// rather than discarding, so the in-flight collage needs a way back in.
+    /// Styled identically to `editLastCollageBanner` below (same row shape,
+    /// same accent text), distinguished only by icon and copy. Tapping it
+    /// hands straight to `onContinueCurrent` - unlike "Edit last collage"
+    /// there's no promotion step, current.json is already current.
+    private var continueCurrentCollageBanner: some View {
+        Button {
+            onContinueCurrent?()
+        } label: {
+            HStack {
+                Image(systemName: "arrow.uturn.forward")
+                Text("Continue current collage")
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+            }
+            .padding(12)
+            .foregroundStyle(Color.mosaicAccent)
+            .background(Color.white.opacity(0.06))
         }
     }
 
@@ -448,26 +1078,99 @@ struct PickerView: View {
         }
     }
 
+    /// Floating CTA capsule height (54) + its own bottom padding (16) + a
+    /// little breathing room, so the last grid row can scroll clear of it
+    /// instead of sitting underneath (Justin, 2026-07-26). Always applied
+    /// now that the CTA is always present, not just once a selection is
+    /// valid.
+    private var gridBottomInset: CGFloat { 90 }
+
+    /// Selection-identity bugfix (Justin, 2026-07-26): this grid used to
+    /// `ForEach(0..<state.assets.count, id: \.self)`, keying every cell's
+    /// SwiftUI identity to its plain integer INDEX rather than the asset
+    /// itself. `PickerState.reload()` re-fetches a brand-new
+    /// `PHFetchResult` (sorted newest-first) on every appearance, so if the
+    /// library changed AT ALL between two appearances of the picker (a
+    /// screenshot taken, a photo deleted, iCloud sync landing new assets),
+    /// the SAME index pointed at a DIFFERENT `PHAsset` than before. SwiftUI,
+    /// seeing an unchanged identity, reused the existing `GridThumbnail`
+    /// view rather than tearing it down - so that cell's own `@State`
+    /// (`image`/`isDegraded`/`requestID`) kept showing the OLD photo (since
+    /// `.onAppear`, the only place a thumbnail fetch kicks off, never re-ran
+    /// for a reused identity), while `isSelected`/`selectionOrder` and the
+    /// tap gesture underneath had already moved on to the NEW asset at that
+    /// index. The visible photo and the asset actually wired to the tap
+    /// silently diverged - tapping the photo you SEE toggled selection on a
+    /// different one. That's the "wrong photo selected, unpredictably"
+    /// symptom: invisible when the library hadn't changed since last time,
+    /// which is exactly why it read as random rather than reproducible.
+    /// Fix: key each cell to the asset's own stable `localIdentifier`
+    /// instead of its index. `PHFetchResult` only conforms to
+    /// `NSFastEnumeration` (not `Sequence`/`RandomAccessCollection`, verified
+    /// against the SDK - `ForEach` needs `RandomAccessCollection`), so
+    /// `PickerState.gridAssets` materializes it into a plain `[PHAsset]`
+    /// ONCE per fetch (reload/album change), not per render - enumerating a
+    /// multi-thousand-photo library inside `body` made every re-render
+    /// (each selection tap, every scroll frame of the collapsing hero, the
+    /// back-from-editor transition) pay a full main-thread enumeration,
+    /// which is exactly the "picker is almost unusable" / "2-3 second back
+    /// lag" Justin reported (2026-07-26 perf fix). A changed asset at a
+    /// given position is still a genuinely different `ForEach` identity, so
+    /// the stale-cell selection fix is preserved.
     private var grid: some View {
-        ScrollView {
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 4), spacing: 2) {
-                ForEach(0..<state.assets.count, id: \.self) { index in
-                    let asset = state.assets.object(at: index)
-                    GridThumbnail(
-                        asset: asset,
-                        library: state.library,
-                        isSelected: state.isSelected(asset.localIdentifier),
-                        pulse: state.pulseNextBadge
-                    )
-                    .onTapGesture {
-                        state.toggleSelection(asset.localIdentifier)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: pickerColumns), spacing: 2) {
+                    ForEach(state.gridAssets, id: \.localIdentifier) { asset in
+                        GridThumbnail(
+                            asset: asset,
+                            library: state.library,
+                            isSelected: state.isSelected(asset.localIdentifier),
+                            selectionOrder: state.selectionOrder(asset.localIdentifier),
+                            pulse: state.pulseNextBadge
+                        )
+                        .onTapGesture {
+                            state.toggleSelection(asset.localIdentifier)
+                        }
                     }
+                }
+                // Pinch-to-resize (Justin, 2026-07-26): `.simultaneousGesture`
+                // on the grid CONTENT (not the ScrollView itself) so it never
+                // competes with the ScrollView's own drag gesture or a cell's
+                // `.onTapGesture` - all three recognize side by side.
+                .simultaneousGesture(pinchToResizeGesture)
+
+                Color.clear.frame(height: gridBottomInset)
+            }
+            .scrollIndicators(.visible)
+            // Deviation: a custom fast-scroll scrubber is Phase 4 polish; the
+            // system scroll indicator is the accepted Phase 3 stand-in.
+            //
+            // Collapsing hero header (Justin, 2026-07-26): the iOS 18
+            // `onScrollGeometryChange` is the cleanest current API for this -
+            // no GeometryReader-on-scroll-content/PreferenceKey plumbing
+            // needed, just the live content offset feeding `masthead`'s
+            // continuous collapse interpolation (see `heroCollapseProgress`).
+            // Scroll-offset tracking removed entirely (Justin, 2026-07-27):
+            // its only consumer was the hero collapse, which is gone - see
+            // `masthead`'s doc comment for why that had to go. Nothing now
+            // re-renders the picker on scroll at all, which is also the
+            // cheapest possible scrolling.
+            // Return-to-task scroll (Justin, 2026-07-26): when the picker
+            // reappears with an existing selection - the editor's "Photos"
+            // back button, landing back on the same long-lived
+            // `PickerState` - jump the grid so the FIRST selected photo is
+            // visible, unanimated. Guarded on a non-empty selection, so a
+            // genuine first launch (nothing selected yet) never scrolls.
+            // `DispatchQueue.main.async` gives the grid one runloop turn to
+            // lay out before `scrollTo` looks for the target cell's id.
+            .onAppear {
+                guard let firstSelectedID = state.selectedAssetIDs.first else { return }
+                DispatchQueue.main.async {
+                    proxy.scrollTo(firstSelectedID, anchor: .center)
                 }
             }
         }
-        .scrollIndicators(.visible)
-        // Deviation: a custom fast-scroll scrubber is Phase 4 polish; the
-        // system scroll indicator is the accepted Phase 3 stand-in.
     }
 
     private var deniedState: some View {
@@ -528,6 +1231,9 @@ private struct GridThumbnail: View {
     let asset: PHAsset
     let library: PhotoLibraryService
     let isSelected: Bool
+    /// 1-based pick order, nil when unselected - the big centered number
+    /// (Justin, 2026-07-26). Always non-nil when `isSelected` is true.
+    let selectionOrder: Int?
     let pulse: Bool
 
     @State private var image: UIImage?
@@ -553,25 +1259,50 @@ private struct GridThumbnail: View {
             }
             .frame(width: geo.size.width, height: geo.size.width)
             .overlay {
+                // Kept as the lighter `mosaicAccent` (Justin, 2026-07-26):
+                // against the now-deeper radial gradient below, this thin
+                // rim reads as a highlight edge rather than clashing - a
+                // second deep-blue layer here would just muddy into the
+                // gradient instead of outlining it.
                 if isSelected {
                     Rectangle()
                         .strokeBorder(Color.mosaicAccent, lineWidth: 2.5)
                 }
             }
-            .overlay(alignment: .bottomTrailing) {
-                if isSelected {
+            // Selection vignette + big centered order number (Justin,
+            // 2026-07-26) - replaces the small corner checkmark badge, which
+            // wasn't unmistakable at a glance across a dense grid. Radial
+            // gradient is heavier at the edges (0.55) and lighter dead
+            // center (0.15) so the photo stays readable through the middle
+            // while the accent color still reads clearly as "selected" from
+            // the corners in. `endRadius` at 75% of the cell width pushes
+            // full edge strength out past the corners (a unit square's
+            // half-diagonal is ~70.7% of its side). Deep accent (Justin,
+            // 2026-07-26) - same ramp, more saturated color, so the "selected"
+            // read holds up at a glance next to the lighter accent stroke.
+            .overlay {
+                if isSelected, let selectionOrder {
                     ZStack {
-                        Circle().fill(Color.mosaicAccent)
-                        Circle().strokeBorder(.black.opacity(0.35), lineWidth: 1)
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 11, weight: .bold))
+                        RadialGradient(
+                            gradient: Gradient(stops: [
+                                .init(color: Color.mosaicAccentDeep.opacity(0.15), location: 0),
+                                .init(color: Color.mosaicAccentDeep.opacity(0.55), location: 1)
+                            ]),
+                            center: .center,
+                            startRadius: 0,
+                            endRadius: geo.size.width * 0.75
+                        )
+                        Text("\(selectionOrder)")
+                            .font(.system(size: geo.size.height * 0.4, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.5), radius: 3, y: 1)
                     }
-                    .frame(width: 20, height: 20)
-                    .padding(4)
-                    .scaleEffect(pulse ? 1.15 : 1.0)
+                    .scaleEffect(pulse ? 1.08 : 1.0)
+                    .transition(.opacity.combined(with: .scale(scale: 0.85)))
                 }
             }
+            .animation(.spring(response: 0.28, dampingFraction: 0.7), value: isSelected)
+            .animation(.spring(response: 0.25, dampingFraction: 0.5), value: pulse)
             .onAppear {
                 requestID = library.requestThumbnail(for: asset, targetSize: CGSize(width: geo.size.width * 3, height: geo.size.width * 3)) { img, degraded in
                     image = img
@@ -583,6 +1314,10 @@ private struct GridThumbnail: View {
             }
         }
         .aspectRatio(1, contentMode: .fit)
+        // The tappable region is exactly the visible square - no reliance on
+        // which sub-view happens to be opaque (Justin, 2026-07-27, hardening
+        // alongside the masthead fix that actually caused the mis-taps).
+        .contentShape(Rectangle())
     }
 }
 

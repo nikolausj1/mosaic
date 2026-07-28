@@ -75,7 +75,7 @@ final class EditorState {
 
     // MARK: - Border swatches (design revision, 2026-07-17)
 
-    /// Three colors sampled from every photo's downsampled pixels (see
+    /// Four colors sampled from every photo's downsampled pixels (see
     /// `computeSampledSwatches`), computed once here at editor-open time -
     /// not recomputed on Replace/Remove, matching "computed once when the
     /// editor opens" in the task brief. Restore is the exception: `images`
@@ -326,6 +326,114 @@ final class EditorState {
         document = doc
     }
 
+    /// Border tab assumes intent (Justin, 2026-07-26): opening the Border
+    /// tray on a zero-border document animates the thickness up to a modest
+    /// visible starter so the sliders demonstrably control something. One
+    /// undo snapshot via the same begin/commit pair the slider itself uses;
+    /// re-opening the tray with any nonzero border is a no-op.
+    func applyBorderStarterIfZero() {
+        guard document.border.inner == 0, document.border.outer == 0 else { return }
+        beginGesture()
+        // 0.045 on first pass read as too heavy (Justin, 2026-07-26) -
+        // 0.02 (~13% of the slider) shows the border exists without
+        // committing the composition to a chunky frame.
+        setBorderThickness(0.02)
+        commitGesture()
+    }
+
+    /// B11 canvas eyedropper (Justin, 2026-07-26): true while the Border
+    /// tray's eyedropper is armed - CanvasView overlays a loupe magnifier
+    /// (see `samplingComposite` and `applySampledColor` below) that samples
+    /// the collage on release.
+    var isSamplingColor = false
+
+    /// LOUPE EYEDROPPER (Justin, 2026-07-26 rework of the original one-tap
+    /// sampler - "I expect a mag glass / pixel selection UI... not what
+    /// shipped"): the composited collage, rendered ONCE via the same
+    /// `CollageRenderer.renderForSampling` path the old one-tap sampler
+    /// used, held here for the duration of sampling so CanvasView's loupe
+    /// can magnify live off this cached bitmap on every touch-move instead
+    /// of re-rendering per frame. Sized bigger than the old one-shot's
+    /// 480pt (900pt - see `beginColorSampling`) so a ~7-8x magnified crop
+    /// still looks sharp. Nil before the render resolves and whenever
+    /// sampling isn't armed.
+    private(set) var samplingComposite: UIImage?
+
+    /// Arms the eyedropper AND kicks off the one-time composite render the
+    /// loupe magnifies from - called instead of setting `isSamplingColor`
+    /// directly (see BorderTrayView's eyedropper button) so the render
+    /// starts the instant the user commits to sampling, not on their first
+    /// touch. The render itself reuses already-decoded in-memory proxies
+    /// (no Photos re-decode), so in practice it resolves within a frame or
+    /// two of arming.
+    func beginColorSampling() {
+        isSamplingColor = true
+        samplingComposite = nil
+        let width = 900.0
+        let aspect = canvasSize.height / max(canvasSize.width, 1)
+        let exportSize = CGSize(width: width, height: (width * aspect).rounded())
+        let proxies = images
+        let doc = document
+        Task { [weak self] in
+            let provider: CollageImageProvider = { id, _ in proxies[id]?.cgImage }
+            let rendered = await CollageRenderer().renderForSampling(document: doc, exportSize: exportSize, imageProvider: provider)
+            self?.samplingComposite = rendered
+        }
+    }
+
+    /// Disarms the eyedropper and releases the cached composite - called
+    /// both by the hint capsule's explicit cancel and by
+    /// `applySampledColor` once a color has been applied.
+    func endColorSampling() {
+        isSamplingColor = false
+        samplingComposite = nil
+    }
+
+    /// Reads the composited pixel at a normalized canvas point (0...1 in
+    /// both axes) from the cached `samplingComposite` and applies it as the
+    /// border color - the loupe's release action (and a plain tap, which is
+    /// just a drag that never moved - see CanvasView's `loupeDragGesture`).
+    /// A no-op (still disarms) if the composite hasn't resolved yet.
+    func applySampledColor(atNormalized point: CGPoint) {
+        defer { endColorSampling() }
+        guard let composite = samplingComposite, let rgba = Self.pixelColor(in: composite, atNormalized: point) else { return }
+        setBorderColor(rgba)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    /// Reads one pixel from `image` at a normalized position via a 1x1
+    /// bitmap draw - no full-image byte buffer needed. Not `private`
+    /// (Justin, 2026-07-26): CanvasView's loupe reuses this exact function
+    /// on every touch-move to read the LIVE center-pixel color for the
+    /// loupe's border ring, not just once on release.
+    static func pixelColor(in image: UIImage, atNormalized p: CGPoint) -> RGBA? {
+        guard let cg = image.cgImage, cg.width > 0, cg.height > 0 else { return nil }
+        let x = min(max(Int(p.x * CGFloat(cg.width)), 0), cg.width - 1)
+        let yTop = min(max(Int(p.y * CGFloat(cg.height)), 0), cg.height - 1)
+        var pixel = [UInt8](repeating: 0, count: 4)
+        guard let ctx = CGContext(
+            data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        ) else { return nil }
+        // The CGImage out of CollageRenderer's makeTopLeftContext already
+        // carries that context's top-left flip, so the usual bottom-left
+        // correction would double-flip (verified empirically in the
+        // 2026-07-26 review pass: tree taps sampled the road). Translating
+        // by the raw top-based y is what lands the tapped pixel on the
+        // context's single pixel.
+        ctx.draw(cg, in: CGRect(
+            x: -CGFloat(x),
+            y: -CGFloat(yTop),
+            width: CGFloat(cg.width),
+            height: CGFloat(cg.height)
+        ))
+        return RGBA(
+            r: Double(pixel[0]) / 255, g: Double(pixel[1]) / 255,
+            b: Double(pixel[2]) / 255, a: 1
+        )
+    }
+
     /// Corner radius is a pure paint-time property (Layout.swift's solver
     /// never reads it), so no reclamp is needed here.
     func setBorderRadius(_ fraction: Double) {
@@ -346,102 +454,296 @@ final class EditorState {
         pushUndo(old)
     }
 
-    /// Three colors sampled from every photo currently in the document,
-    /// shown in the swatch row alongside plain white/black. Downsamples
-    /// each proxy UIImage to ~48x48, buckets pixels into 4-bits-per-channel
-    /// (16 levels/channel) histogram cells across ALL photos combined, then
-    /// picks:
-    ///  - `bright`: highest-V bucket among those with saturation > 0.25 and
-    ///    a pixel share >= 0.3% (fallback: highest-V bucket, any saturation)
-    ///  - `dark`: lowest-V bucket with pixel share >= 0.3%, preferring V in
-    ///    0.05...0.4 so it reads as a dark COLOR rather than near-black
-    ///    (fallback: lowest-V bucket meeting the share threshold, then
-    ///    lowest-V overall)
-    ///  - `mid`: highest-pixel-share bucket with 0.3 < V < 0.75 - the
-    ///    photos' dominant tone (fallback: highest-share bucket overall)
-    /// Any two results within 0.08 RGB-euclidean distance of each other are
-    /// deduped by walking to the next-best candidate for the later one, in
-    /// bright -> mid -> dark order. Falls back to neutral grays if no
-    /// photo has finished loading yet (`images` empty / zero opaque
-    /// pixels), so the swatch row always has exactly 3 sampled swatches.
+    /// Three vibrant, hue-distinct colors sampled from every photo currently
+    /// in the document, shown in the swatch row alongside plain white/black
+    /// (Justin, 2026-07-26: "scan the photo and find the brightest, most
+    /// vibrant colors"). Downsamples each proxy UIImage to ~64x64 and bins
+    /// every qualifying pixel into one of `hueBucketCount` hue buckets
+    /// (spanning ALL photos combined, not per-photo), where a pixel
+    /// "qualifies" only if it's not near-black, near-white, or low-saturation
+    /// - grays and shadows shouldn't be able to win a "vibrant" swatch just
+    /// by being common. Each bucket's score is the sum of `saturation *
+    /// brightness` across its qualifying pixels, so a hue wins both by being
+    /// vivid and by covering real area in the photos. The top 3 scoring
+    /// buckets that are at least ~30 degrees of hue apart become the
+    /// swatches (most vibrant first); if the photos don't have 3 distinct
+    /// vibrant hues, the remaining slots fall back to the next-best buckets
+    /// even if their hues are close, so the row always has exactly 3
+    /// swatches. Each winner's saturation/brightness is then clamped to a
+    /// presentable border-color range (capped saturation, floored
+    /// brightness) so the result never reads neon or muddy. Falls back to
+    /// neutral grays if no photo has finished loading yet (`images` empty)
+    /// or every pixel fails the vibrancy bar.
+    ///
+    /// A fourth, independently-scored "brightest" swatch is added on top of
+    /// these three (Justin, 2026-07-26) - see `pickBrightestSwatch`'s doc
+    /// comment for that pass in full.
+    ///
+    /// Per-hue-bucket accumulator for the "brightest" sixth swatch (Justin,
+    /// 2026-07-26) - declared at class scope (rather than local to
+    /// `computeSampledSwatches`) so `pickBrightestSwatch` below can take it
+    /// as a parameter type.
+    private struct BrightBucket {
+        var sSum: Double = 0
+        var vSum: Double = 0
+        var count: Int = 0
+    }
+
     private static func computeSampledSwatches(document: Document, images: [PhotoID: UIImage]) -> SampledBorderColors {
         let ids = photoIDs(in: document.root)
 
-        struct BucketAccumulator {
-            var rSum: Double = 0
-            var gSum: Double = 0
-            var bSum: Double = 0
+        let hueBucketCount = 30
+        let hueBucketWidth = 360.0 / Double(hueBucketCount)
+
+        // Vibrant-candidacy thresholds: a pixel below the saturation floor,
+        // below the brightness floor, or above the brightness ceiling while
+        // desaturated never contributes to any bucket's score.
+        let minVibrantSaturation = 0.20
+        let minVibrantBrightness = 0.15
+        let nearWhiteBrightness = 0.95
+        let nearWhiteSaturation = 0.10
+
+        // Sixth swatch (Justin, 2026-07-26): "brightest" is scored on an
+        // entirely separate pass over the same pixels - a lower, standalone
+        // saturation floor (0.15 vs. vibrant's 0.20) so it can pick up
+        // brighter-but-less-punchy content the vibrancy pass would reject,
+        // while still keeping true near-white/gray pixels (saturation ~0)
+        // from winning. See `pickBrightestSwatch` for the scoring/fallback.
+        let minBrightSaturation = 0.15
+        // Seventh swatch (Justin, 2026-07-26): "luminous" runs a third pass
+        // with an even lower floor - pale-but-glowing content (bright sky,
+        // sunlit haze) qualifies here that both passes above reject.
+        let minLuminousSaturation = 0.08
+
+        struct HueBucket {
+            var sSum: Double = 0
+            var vSum: Double = 0
             var count: Int = 0
+            var score: Double = 0   // sum of saturation * brightness
         }
 
-        var buckets: [Int: BucketAccumulator] = [:]
-        var totalCount = 0
+        var buckets = [HueBucket](repeating: HueBucket(), count: hueBucketCount)
+        var brightBuckets = [BrightBucket](repeating: BrightBucket(), count: hueBucketCount)
+        var lumBuckets = [BrightBucket](repeating: BrightBucket(), count: hueBucketCount)
+        var qualifyingCount = 0
 
         for id in ids {
             guard let image = images[id] else { continue }
-            for pixel in downsampledPixels(of: image, dimension: 48) {
+            for pixel in downsampledPixels(of: image, dimension: 64) {
                 guard pixel.a > 0 else { continue }
-                let rb = min(15, Int(pixel.r * 255) >> 4)
-                let gb = min(15, Int(pixel.g * 255) >> 4)
-                let bb = min(15, Int(pixel.b * 255) >> 4)
-                let key = (rb << 8) | (gb << 4) | bb
-                var bucket = buckets[key] ?? BucketAccumulator()
-                bucket.rSum += pixel.r
-                bucket.gSum += pixel.g
-                bucket.bSum += pixel.b
-                bucket.count += 1
-                buckets[key] = bucket
-                totalCount += 1
+                let (h, s, v) = rgbToHSV(r: pixel.r, g: pixel.g, b: pixel.b)
+                let index = min(hueBucketCount - 1, Int(h / hueBucketWidth))
+
+                if s >= minBrightSaturation {
+                    brightBuckets[index].sSum += s
+                    brightBuckets[index].vSum += v
+                    brightBuckets[index].count += 1
+                }
+
+                if s >= minLuminousSaturation, !(v >= nearWhiteBrightness && s < nearWhiteSaturation) {
+                    lumBuckets[index].sSum += s
+                    lumBuckets[index].vSum += v
+                    lumBuckets[index].count += 1
+                }
+
+                guard v >= minVibrantBrightness,
+                      s >= minVibrantSaturation,
+                      !(v >= nearWhiteBrightness && s < nearWhiteSaturation)
+                else { continue }
+
+                buckets[index].sSum += s
+                buckets[index].vSum += v
+                buckets[index].count += 1
+                buckets[index].score += s * v
+                qualifyingCount += 1
             }
         }
 
-        guard totalCount > 0 else { return .fallback }
+        // Border colors should be presentable, never neon or muddy: cap
+        // saturation and floor brightness before converting back to RGB.
+        // Shared by both the vibrant candidates below and the brightest
+        // swatch (`pickBrightestSwatch`) per the task brief's "same clamps".
+        let saturationCeiling = 0.85
+        let brightnessFloor = 0.35
+
+        guard qualifyingCount > 0 else {
+            // No photo cleared the vibrancy bar at all - vibrant1-3 fall
+            // back to neutral grays, but the brightest pass ran independently
+            // above and may still have a real answer (e.g. photos that are
+            // bright and mildly saturated throughout, never hitting
+            // vibrant's stricter 0.20 floor).
+            var fallback = SampledBorderColors.fallback
+            fallback.brightest = pickBrightestSwatch(
+                brightBuckets: brightBuckets,
+                hueBucketWidth: hueBucketWidth,
+                excludingHues: [],
+                saturationCeiling: saturationCeiling,
+                brightnessFloor: brightnessFloor
+            )
+            fallback.luminous = pickBrightestSwatch(
+                brightBuckets: lumBuckets,
+                hueBucketWidth: hueBucketWidth,
+                excludingHues: hueOf(fallback.brightest).map { [$0] } ?? [],
+                saturationCeiling: 1.0,
+                brightnessFloor: brightnessFloor
+            )
+            return fallback
+        }
+
+        func hueDistance(_ a: Double, _ b: Double) -> Double {
+            let d = abs(a - b).truncatingRemainder(dividingBy: 360)
+            return min(d, 360 - d)
+        }
 
         struct Candidate {
+            let hue: Double
             let rgba: RGBA
-            let s: Double
-            let v: Double
-            let fraction: Double
         }
 
-        let candidates: [Candidate] = buckets.values.map { bucket in
-            let c = Double(bucket.count)
-            let r = bucket.rSum / c, g = bucket.gSum / c, b = bucket.bSum / c
-            let (_, s, v) = rgbToHSV(r: r, g: g, b: b)
-            return Candidate(rgba: RGBA(r: r, g: g, b: b, a: 1), s: s, v: v, fraction: c / Double(totalCount))
-        }
-
-        func distance(_ a: RGBA, _ b: RGBA) -> Double {
-            let dr = a.r - b.r, dg = a.g - b.g, db = a.b - b.b
-            return (dr * dr + dg * dg + db * db).squareRoot()
-        }
-
-        func firstDistinct(_ sorted: [Candidate], excluding chosen: [RGBA]) -> Candidate? {
-            for candidate in sorted where chosen.allSatisfy({ distance($0, candidate.rgba) >= 0.08 }) {
-                return candidate
+        let candidates: [Candidate] = buckets.enumerated()
+            .compactMap { index, bucket -> (Candidate, Double)? in
+                guard bucket.count > 0 else { return nil }
+                let hue = (Double(index) + 0.5) * hueBucketWidth
+                let s = min(bucket.sSum / Double(bucket.count), saturationCeiling)
+                let v = max(bucket.vSum / Double(bucket.count), brightnessFloor)
+                return (Candidate(hue: hue, rgba: hsvToRGB(h: hue, s: s, v: v)), bucket.score)
             }
-            return sorted.first
+            .sorted { $0.1 > $1.1 }
+            .map { $0.0 }
+
+        guard !candidates.isEmpty else {
+            var fallback = SampledBorderColors.fallback
+            fallback.brightest = pickBrightestSwatch(
+                brightBuckets: brightBuckets,
+                hueBucketWidth: hueBucketWidth,
+                excludingHues: [],
+                saturationCeiling: saturationCeiling,
+                brightnessFloor: brightnessFloor
+            )
+            fallback.luminous = pickBrightestSwatch(
+                brightBuckets: lumBuckets,
+                hueBucketWidth: hueBucketWidth,
+                excludingHues: hueOf(fallback.brightest).map { [$0] } ?? [],
+                saturationCeiling: 1.0,
+                brightnessFloor: brightnessFloor
+            )
+            return fallback
         }
 
-        // Bright: highest V among saturated (>0.25), well-represented (>=0.3%) buckets.
-        let brightQuota = candidates.filter { $0.s > 0.25 && $0.fraction >= 0.003 }
-        let brightSorted = (brightQuota.isEmpty ? candidates : brightQuota).sorted { $0.v > $1.v }
+        // Greedily take the 3 best hue-distinct winners (>= 30 degrees
+        // apart); pad any remaining slots with the next-best candidates
+        // regardless of hue proximity so the row is always exactly 3.
+        var chosen: [Candidate] = []
+        for candidate in candidates where chosen.count < 3 {
+            if chosen.allSatisfy({ hueDistance($0.hue, candidate.hue) >= 30 }) {
+                chosen.append(candidate)
+            }
+        }
+        for candidate in candidates where chosen.count < 3 {
+            if !chosen.contains(where: { $0.hue == candidate.hue }) {
+                chosen.append(candidate)
+            }
+        }
+        while chosen.count < 3, let best = candidates.first {
+            chosen.append(best)
+        }
 
-        // Dark: lowest V among well-represented buckets, preferring a dark COLOR (V 0.05...0.4).
-        let darkQuota = candidates.filter { $0.fraction >= 0.003 }
-        let darkPreferred = darkQuota.filter { $0.v >= 0.05 && $0.v <= 0.4 }
-        let darkPool = !darkPreferred.isEmpty ? darkPreferred : (!darkQuota.isEmpty ? darkQuota : candidates)
-        let darkSorted = darkPool.sorted { $0.v < $1.v }
+        let brightest = pickBrightestSwatch(
+            brightBuckets: brightBuckets,
+            hueBucketWidth: hueBucketWidth,
+            excludingHues: chosen.map(\.hue),
+            saturationCeiling: saturationCeiling,
+            brightnessFloor: brightnessFloor
+        )
 
-        // Mid: highest-share bucket in the mid-tone band (0.3 < V < 0.75) - the dominant tone.
-        let midBand = candidates.filter { $0.v > 0.3 && $0.v < 0.75 }
-        let midSorted = (midBand.isEmpty ? candidates : midBand).sorted { $0.fraction > $1.fraction }
+        // Seventh swatch: peak brightness, no saturation cap (ceiling 1.0),
+        // hue-distinct from all four derived slots above when possible - the
+        // shared relaxation ladder in pickBrightestSwatch handles convergent
+        // photo sets.
+        let luminous = pickBrightestSwatch(
+            brightBuckets: lumBuckets,
+            hueBucketWidth: hueBucketWidth,
+            excludingHues: chosen.map(\.hue) + (hueOf(brightest).map { [$0] } ?? []),
+            saturationCeiling: 1.0,
+            brightnessFloor: brightnessFloor
+        )
 
-        guard let bright = brightSorted.first else { return .fallback }
-        let mid = firstDistinct(midSorted, excluding: [bright.rgba]) ?? midSorted.first ?? bright
-        let dark = firstDistinct(darkSorted, excluding: [bright.rgba, mid.rgba]) ?? darkSorted.first ?? bright
+        return SampledBorderColors(vibrant1: chosen[0].rgba, vibrant2: chosen[1].rgba, vibrant3: chosen[2].rgba, brightest: brightest, luminous: luminous)
+    }
 
-        return SampledBorderColors(bright: bright.rgba, mid: mid.rgba, dark: dark.rgba)
+    /// Sixth swatch (Justin, 2026-07-26): "brightest" - the brightest sampled
+    /// color across all photos combined, hue-bucketed the same way as the
+    /// vibrancy pass above but scored purely by brightness: `meanBrightness *
+    /// log(count + 1)`, so a bucket needs real photo coverage (not just one
+    /// stray bright pixel) to win - a single hot highlight pixel scores
+    /// `v * log(2) ≈ 0.69v`, while a bucket covering 50 pixels at the same
+    /// mean brightness scores `v * log(51) ≈ 3.93v`, roughly 5.7x higher.
+    /// REQUIRED to read as visually distinct from the three vibrant
+    /// swatches: >= 30 degrees of hue from EACH of them. If nothing clears
+    /// that bar, the constraint relaxes in steps (20, then 10, then any
+    /// distance) rather than silently hand back a near-duplicate of an
+    /// existing swatch - the final (any-distance) rung can still land on the
+    /// same hue as a vibrant swatch in a genuinely single-hue photo set, but
+    /// even then the two differ in saturation/brightness (this pass floors
+    /// brightness higher in practice, since it's scored on brightness), so
+    /// they read as different swatches rather than exact duplicates.
+    /// Hue of an already-picked swatch, for hue-distinctness excludes in
+    /// later passes. Nil for effectively-neutral colors (their hue is
+    /// numerically arbitrary and shouldn't veto anything).
+    private static func hueOf(_ rgba: RGBA) -> Double? {
+        let (h, s, _) = rgbToHSV(r: rgba.r, g: rgba.g, b: rgba.b)
+        return s < 0.05 ? nil : h
+    }
+
+    private static func pickBrightestSwatch(
+        brightBuckets: [BrightBucket],
+        hueBucketWidth: Double,
+        excludingHues: [Double],
+        saturationCeiling: Double,
+        brightnessFloor: Double
+    ) -> RGBA {
+        struct BrightCandidate {
+            let hue: Double
+            let score: Double
+            let rgba: RGBA
+        }
+
+        func hueDistance(_ a: Double, _ b: Double) -> Double {
+            let d = abs(a - b).truncatingRemainder(dividingBy: 360)
+            return min(d, 360 - d)
+        }
+
+        let candidates: [BrightCandidate] = brightBuckets.enumerated()
+            .compactMap { index, bucket -> BrightCandidate? in
+                guard bucket.count > 0 else { return nil }
+                let hue = (Double(index) + 0.5) * hueBucketWidth
+                let meanS = bucket.sSum / Double(bucket.count)
+                let meanV = bucket.vSum / Double(bucket.count)
+                let score = meanV * log(Double(bucket.count) + 1)
+                let s = min(meanS, saturationCeiling)
+                let v = max(meanV, brightnessFloor)
+                return BrightCandidate(hue: hue, score: score, rgba: hsvToRGB(h: hue, s: s, v: v))
+            }
+            .sorted { $0.score > $1.score }
+
+        // No photo had a single pixel above the brightest pass's saturation
+        // floor (e.g. a fully grayscale set) - fall back to a light neutral
+        // rather than collapse the swatch row down to 5 entries.
+        guard !candidates.isEmpty else {
+            return RGBA(r: 0.92, g: 0.92, b: 0.92, a: 1)
+        }
+
+        for threshold in [30.0, 20.0, 10.0, 0.0] {
+            if let match = candidates.first(where: { candidate in
+                excludingHues.allSatisfy { hueDistance($0, candidate.hue) >= threshold }
+            }) {
+                return match.rgba
+            }
+        }
+
+        // Unreachable - the 0-degree rung above always matches the
+        // top-scoring candidate - kept only for exhaustiveness.
+        return candidates[0].rgba
     }
 
     /// Draws `image` into a `dimension`x`dimension` RGBA bitmap (ignoring
@@ -496,6 +798,28 @@ final class EditorState {
         h *= 60
         if h < 0 { h += 360 }
         return (h, s, v)
+    }
+
+    /// Inverse of `rgbToHSV`, used to turn a hue bucket's winning
+    /// (hue, saturation, brightness) back into a displayable RGBA swatch.
+    /// `h` is expected in 0..<360.
+    private static func hsvToRGB(h: Double, s: Double, v: Double) -> RGBA {
+        let c = v * s
+        let hPrime = h / 60
+        let x = c * (1 - abs(hPrime.truncatingRemainder(dividingBy: 2) - 1))
+        let m = v - c
+
+        let base: (r: Double, g: Double, b: Double)
+        switch hPrime {
+        case 0..<1: base = (c, x, 0)
+        case 1..<2: base = (x, c, 0)
+        case 2..<3: base = (0, c, x)
+        case 3..<4: base = (0, x, c)
+        case 4..<5: base = (x, 0, c)
+        default:    base = (c, 0, x)
+        }
+
+        return RGBA(r: base.r + m, g: base.g + m, b: base.b + m, a: 1)
     }
 
     // MARK: - Photo toolbar actions (Phase 4)
@@ -685,17 +1009,33 @@ struct SwapState {
 }
 
 /// The Border tray's three sampled swatches (see
-/// `EditorState.computeSampledSwatches`). `.fallback` is neutral grays,
-/// used before any photo has finished loading (e.g. mid-restore) so the
-/// swatch row always renders exactly 3 sampled circles.
+/// `EditorState.computeSampledSwatches`), ranked most to least vibrant.
+/// `.fallback` is neutral grays, used before any photo has finished loading
+/// (e.g. mid-restore) so the swatch row always renders exactly 3 sampled
+/// circles.
 struct SampledBorderColors: Equatable {
-    var bright: RGBA
-    var mid: RGBA
-    var dark: RGBA
+    var vibrant1: RGBA
+    var vibrant2: RGBA
+    var vibrant3: RGBA
+    /// Sixth swatch (Justin, 2026-07-26): the brightest sampled color,
+    /// distinct in hue from the three vibrant swatches above whenever a
+    /// qualifying bucket allows it - see `EditorState.pickBrightestSwatch`'s
+    /// doc comment for the exact scoring and the fallback ladder used when
+    /// no such candidate exists.
+    var brightest: RGBA
+    /// Seventh swatch (Justin, 2026-07-26): "luminous" - the peak-brightness
+    /// color. Same scoring machinery as `brightest` but with a much lower
+    /// saturation floor (0.08) and NO saturation cap on output, so a blazing
+    /// sky blue or bright yellow can win here even when the stricter
+    /// `brightest` pass settled on something punchier. Distinct in hue from
+    /// all four derived slots above when the photos allow it.
+    var luminous: RGBA
 
     static let fallback = SampledBorderColors(
-        bright: RGBA(r: 0.85, g: 0.85, b: 0.85, a: 1),
-        mid: RGBA(r: 0.5, g: 0.5, b: 0.5, a: 1),
-        dark: RGBA(r: 0.2, g: 0.2, b: 0.2, a: 1)
+        vibrant1: RGBA(r: 0.85, g: 0.85, b: 0.85, a: 1),
+        vibrant2: RGBA(r: 0.5, g: 0.5, b: 0.5, a: 1),
+        vibrant3: RGBA(r: 0.2, g: 0.2, b: 0.2, a: 1),
+        brightest: RGBA(r: 0.95, g: 0.95, b: 0.95, a: 1),
+        luminous: RGBA(r: 0.75, g: 0.78, b: 0.85, a: 1)
     )
 }

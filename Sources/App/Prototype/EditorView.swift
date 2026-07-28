@@ -1,13 +1,14 @@
 // Sources/App/Prototype/EditorView.swift
-// Full-screen dark chrome: a top bar (New / Undo / Redo / Save) and the
-// canvas centered in the remaining space, with a contextual bottom bar
-// below it (Phase 4: Layout/Ratio/Border tabs+trays when nothing is
+// Full-screen dark chrome: a top bar (a back control to Photos, and Save)
+// and the canvas centered in the remaining space, with a contextual bottom
+// bar below it (Phase 4: Layout/Ratio/Border tabs+trays when nothing is
 // selected, single-tap photo tools when a photo is selected). `state` is
 // built by the caller (PickerView's confirm flow, or ContentView's
 // -protoLayout/-autoPick launch-arg fallbacks) - this view owns no
 // document-construction logic itself.
 import SwiftUI
 import Photos
+import UIKit
 #if DEBUG
 import os
 #endif
@@ -18,6 +19,7 @@ private let debugExportLogger = Logger(subsystem: "com.levelup.mosaic", category
 
 struct EditorView: View {
     @State var state: EditorState
+    var storeService: StoreService
     var onNew: (() -> Void)?
     /// Phase 5: a real save handler is now wired in from ContentView (see
     /// its doc comment there) - non-nil enables the Save button's visual
@@ -33,8 +35,31 @@ struct EditorView: View {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("hasSeenEditor") private var hasSeenEditor: Bool = false
     @State private var hasAppliedFirstLaunchSelection = false
-    @State private var showDiscardConfirm = false
     @State private var replaceTarget: PhotoID?
+
+    /// First-editor-entry teach (Justin, 2026-07-26, B27 option c; reworked
+    /// from a single-screen spotlight to a live "ghost gesture demo" later
+    /// the same day - see the "Ghost gesture demo" section below). Same
+    /// `hasSeenCoachMarks` key as the coach marks it replaces - the Dev
+    /// sheet's replay and `-resetPersistence` both key off this name, so it
+    /// stays put even though nothing here is a "coach mark" anymore.
+    @AppStorage("hasSeenCoachMarks") private var hasSeenCoachMarks: Bool = false
+    @State private var didTriggerGhostDemo = false
+    /// Overall visible/hidden for the ghost overlay (fingertip + caption) -
+    /// fades in at demo start, fades out at demo end/skip.
+    @State private var ghostDemoVisible = false
+    /// Which live anchor (see CanvasView's CoachMarkAnchorsKey export) the
+    /// ghost fingertip currently tracks: false = the canvas composition
+    /// bracket (phase 1), true = the divider capsule (phase 2). (Justin,
+    /// 2026-07-27: phase 1 used to track the interior corner handle - see
+    /// `runGhostGestureDemo`'s doc comment for why that changed.)
+    @State private var ghostDemoAtDivider = false
+    /// The brief scale-down "press" pulse at the start of each drag leg.
+    @State private var ghostDemoPressed = false
+    /// The pre-demo document, captured once at demo start so any exit path
+    /// (natural finish, skip tap, or an early guard) can restore it exactly.
+    @State private var ghostDemoSnapshot: Document?
+    @State private var ghostDemoTask: Task<Void, Never>?
 
     @State private var saveResult: SaveResult?
     @State private var showSaveSheet = false
@@ -62,7 +87,10 @@ struct EditorView: View {
                         state.selection = nil
                         withAnimation(.easeInOut(duration: 0.2)) { state.activeTray = .none }
                     }
-                CanvasView(state: state, onReady: applyFirstLaunchSelectionIfNeeded)
+                CanvasView(state: state, onReady: {
+                    applyFirstLaunchSelectionIfNeeded()
+                    triggerGhostDemoIfNeeded()
+                })
                 if state.isExporting {
                     // PRD: "Exporting: canvas locked." Rather than touching
                     // GestureController.swift/CanvasView.swift, an opaque-
@@ -112,6 +140,40 @@ struct EditorView: View {
             }
         }
         #endif
+        .overlayPreferenceValue(CoachMarkAnchorsKey.self) { anchors in
+            // Ghost gesture demo (Justin, 2026-07-26, replaces the old
+            // single-screen spotlight coach marks): reuses the exact same
+            // CoachMarkAnchorsKey geometry CanvasView already exports for
+            // the divider capsule and corner handle (see its "Coach mark
+            // geometry export" section) - just to place a ghost fingertip
+            // AT those live positions instead of punching scrim holes over
+            // them. Because `runGhostGestureDemo` mutates `state.document`
+            // directly on every animation tick, CanvasView's cells (and so
+            // its anchor markers) re-render every tick too, republishing
+            // this preference with the ACTUAL live corner/divider position -
+            // reading `proxy[anchor]` fresh on every render of this closure
+            // is what makes the fingertip track the reshaping layout with no
+            // separate position state of its own to keep in sync.
+            // `.ignoresSafeArea()` matches the old coach marks' contract:
+            // this overlay (and its tap-anywhere-skip catcher) covers the
+            // true full screen, header and bottom bar included.
+            GeometryReader { proxy in
+                if ghostDemoVisible {
+                    let targetAnchor = ghostDemoAtDivider ? anchors.divider : anchors.bracket
+                    GhostGestureOverlay(
+                        screenSize: proxy.size,
+                        fingertipCenter: targetAnchor.map { anchor in
+                            let rect = proxy[anchor]
+                            return CGPoint(x: rect.midX, y: rect.midY)
+                        },
+                        isPressed: ghostDemoPressed,
+                        captionText: "Watch: drag a corner to reshape, a seam to resize",
+                        onSkip: skipGhostDemo
+                    )
+                }
+            }
+            .ignoresSafeArea()
+        }
         .sheet(isPresented: Binding(
             get: { replaceTarget != nil },
             set: { if !$0 { replaceTarget = nil } }
@@ -120,10 +182,10 @@ struct EditorView: View {
         }
         .sheet(isPresented: $showSaveSheet) {
             if let saveResult {
-                SaveSheetView(result: saveResult) {
+                SaveSheetView(result: saveResult, onDone: {
                     showSaveSheet = false
                     onDone?()
-                }
+                }, storeService: storeService)
             }
         }
         .alert("Couldn't Save", isPresented: $showSaveError, presenting: saveErrorMessage) { _ in
@@ -131,6 +193,16 @@ struct EditorView: View {
             Button("Cancel", role: .cancel) {}
         } message: { message in
             Text(message)
+        }
+        .onChange(of: state.activeTray) { _, newTray in
+            // Border tab assumes intent (Justin, 2026-07-26): arriving on a
+            // zero-border document animates thickness up to a visible
+            // starter so the sliders demonstrably control something.
+            if newTray == .border {
+                withAnimation(.easeInOut(duration: 0.35)) {
+                    state.applyBorderStarterIfZero()
+                }
+            }
         }
         .onChange(of: state.selection) { _, newSelection in
             // Design revision 2026-07-17: trays and the photo strip may
@@ -177,6 +249,13 @@ struct EditorView: View {
         let canvasSize = state.canvasSize
         let document = state.document
         let images = state.images
+        // B8: the ONE place entitlement reaches the export pipeline - decide
+        // per-save, right before rendering, so a purchase completed earlier
+        // in this same session (paywall from the save sheet or Settings)
+        // takes effect on the very next Save without any other plumbing.
+        state.saveCoordinator.decorator = storeService.isUnlocked
+            ? NoOpDecorator()
+            : WatermarkDecorator(outerBorderFraction: document.border.outer)
         let outcome = await state.saveCoordinator.save(document: document, images: images, canvasSize: canvasSize)
         state.isExporting = false
 
@@ -195,7 +274,7 @@ struct EditorView: View {
     @ViewBuilder
     private var replaceSheet: some View {
         if let photoID = replaceTarget {
-            PickerView(state: PickerState(mode: .replace), onReplaceConfirmed: { image, pixelSize, asset in
+            PickerView(state: PickerState(mode: .replace), storeService: storeService, onReplaceConfirmed: { image, pixelSize, asset in
                 Task {
                     await state.replace(
                         photoID: photoID,
@@ -226,72 +305,59 @@ struct EditorView: View {
         .offset(y: -170) // clear the bottom bar + floating photo strip
     }
 
-    /// Header redesign, 2026-07-17: transparent bar (mosaicBackground shows
-    /// through - no fill of its own) with a hairline bottom divider, replacing
-    /// the old opaque mosaicSurface bar.
+    /// Header rework (Justin, 2026-07-26): the old New/Undo/Redo/Save row is
+    /// gone. LEFT is now a plain back control - chevron + "Photos" - that
+    /// calls `onNew` directly with no confirmation dialog of any kind (the
+    /// other worker is changing `onNew`'s own semantics to a non-destructive
+    /// "back to the picker"; this view just calls it, same as any other
+    /// closure it's handed). Undo/Redo buttons are removed entirely - the
+    /// undo/redo MACHINERY in EditorState is untouched, there's just no
+    /// header affordance for it anymore. RIGHT is Save alone, made the
+    /// header's one strong element: a full 44pt-tall accent capsule with a
+    /// larger semibold label, instead of the old 34pt caps-tracked pill.
+    /// Still transparent (mosaicBackground shows through) with the same
+    /// hairline bottom divider from the 2026-07-17 pass.
     private var topBar: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 Button {
-                    showDiscardConfirm = true
+                    onNew?()
                 } label: {
-                    capsText("New")
-                        .foregroundStyle(Color.white.opacity(0.55))
-                        .frame(minWidth: 44, minHeight: 44, alignment: .leading)
-                }
-                .confirmationDialog("Discard current collage?", isPresented: $showDiscardConfirm, titleVisibility: .visible) {
-                    Button("Discard", role: .destructive) { onNew?() }
-                    Button("Cancel", role: .cancel) {}
+                    HStack(spacing: 2) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 15, weight: .semibold))
+                        Text("Photos")
+                            .font(.system(size: 15, weight: .medium))
+                    }
+                    .foregroundStyle(Color.white.opacity(0.55))
+                    .frame(minHeight: 44, alignment: .leading)
                 }
 
                 Spacer()
 
-                HStack(spacing: 0) {
-                    Button {
-                        state.undo()
-                    } label: {
-                        Image(systemName: "arrow.uturn.backward")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(Color.white.opacity(state.undoStack.isEmpty ? 0.22 : 0.55))
-                            .frame(width: 44, height: 44)
-                    }
-                    .disabled(state.undoStack.isEmpty)
-                    .padding(.trailing, 4)
-
-                    Button {
-                        state.redo()
-                    } label: {
-                        Image(systemName: "arrow.uturn.forward")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(Color.white.opacity(state.redoStack.isEmpty ? 0.22 : 0.55))
-                            .frame(width: 44, height: 44)
-                    }
-                    .disabled(state.redoStack.isEmpty)
-                    .padding(.trailing, 12)
-
-                    Button {
-                        Task { await performSave() }
-                    } label: {
-                        Group {
-                            if state.isExporting {
-                                ProgressView()
-                                    .tint(.black)
-                            } else {
-                                capsText("Save")
-                                    .foregroundStyle(saveEnabled ? Color.black : Color.white.opacity(0.35))
-                            }
+                Button {
+                    Task { await performSave() }
+                } label: {
+                    Group {
+                        if state.isExporting {
+                            ProgressView()
+                                .tint(.black)
+                        } else {
+                            Text("Save")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(saveEnabled ? Color.black : Color.white.opacity(0.35))
                         }
-                        .frame(height: 34)
-                        .padding(.horizontal, 16)
-                        .background(
-                            Capsule().fill(saveEnabled ? Color.mosaicAccent : Color.mosaicAccent.opacity(0.25))
-                        )
                     }
-                    .disabled(!saveEnabled || state.isExporting)
+                    .frame(height: 44)
+                    .padding(.horizontal, 24)
+                    .background(
+                        Capsule().fill(saveEnabled ? Color.mosaicAccent : Color.mosaicAccent.opacity(0.25))
+                    )
                 }
+                .disabled(!saveEnabled || state.isExporting)
             }
             .padding(.horizontal, 16)
-            .frame(height: 52)
+            .frame(height: 60)
 
             Rectangle()
                 .fill(Color.white.opacity(0.08))
@@ -304,16 +370,6 @@ struct EditorView: View {
     /// tint/label color) and functionally (`performSave`'s own guard).
     private var saveEnabled: Bool {
         onSave != nil && state.unavailablePhotoIDs.isEmpty
-    }
-
-    /// The app's caps-tracked label token: `.system(size: 11, weight:
-    /// .semibold)` + `.textCase(.uppercase)` + `.tracking(0.8)`, used
-    /// throughout the bottom bar/trays and now the header too.
-    private func capsText(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 11, weight: .semibold))
-            .textCase(.uppercase)
-            .tracking(0.8)
     }
 
     private func applyFirstLaunchSelectionIfNeeded() {
@@ -330,6 +386,245 @@ struct EditorView: View {
         let (cells, _) = solve(root: state.document.root, canvasSize: state.canvasSize, border: state.document.border)
         state.selection = cells.first?.id
         hasSeenEditor = true
+    }
+
+    // MARK: - Ghost gesture demo (Justin, 2026-07-26, B27 option c; reworked
+    // same evening from the single-screen spotlight coach marks into a live
+    // demonstration of the corner-drag and divider-drag gestures on the
+    // user's own collage)
+
+    /// Fired from the same `CanvasView.onReady` callback as B19's auto-select
+    /// above, but entirely independent of it: its own `didTriggerGhostDemo`
+    /// guard, the same `hasSeenCoachMarks` flag the old coach marks used,
+    /// never touches `hasSeenEditor` or the cell-one selection.
+    private func triggerGhostDemoIfNeeded() {
+        guard !didTriggerGhostDemo else { return }
+        didTriggerGhostDemo = true
+        guard !hasSeenCoachMarks else { return }
+
+        // Reduce Motion: skip the demo entirely and mark it seen - per
+        // Justin's brief, "no animation is acceptable teaching cost" here;
+        // there's deliberately no static fallback overlay standing in for
+        // it.
+        guard !UIAccessibility.isReduceMotionEnabled else {
+            hasSeenCoachMarks = true
+            return
+        }
+
+        // Fresh-pick arrivals land with the Layout tray already open
+        // (`ContentView.commitNewCollage` sets `activeTray = .layout`
+        // before this view even exists - EditorState is constructed with
+        // it already set, so there's no async "tray slides up" transition
+        // to wait out, just the tray's own settled presence eating extra
+        // vertical space the canvas has to fit into). On top of the usual
+        // ~800ms canvas-settle this gives that a little extra breathing
+        // room before the demo starts manipulating the canvas right above
+        // it. JUDGMENT CALL (Justin can retune): 800ms base, +400ms when
+        // arriving with any tray open.
+        let hasOpenTray = state.activeTray != .none
+        let delayNs: UInt64 = hasOpenTray ? 1_200_000_000 : 800_000_000
+
+        ghostDemoTask = Task {
+            try? await Task.sleep(nanoseconds: delayNs)
+            guard !Task.isCancelled, !hasSeenCoachMarks else { return }
+            await runGhostGestureDemo()
+        }
+    }
+
+    /// Tap-anywhere-skip (GhostGestureOverlay's `onSkip`): cancels the
+    /// in-flight demo task, restores the pre-demo document immediately, and
+    /// marks the demo seen - exactly as final as letting it play out.
+    private func skipGhostDemo() {
+        ghostDemoTask?.cancel()
+        ghostDemoTask = nil
+        hasSeenCoachMarks = true
+        withAnimation(.easeInOut(duration: 0.15)) { ghostDemoVisible = false }
+        if let snapshot = ghostDemoSnapshot {
+            state.document = snapshot
+        }
+        ghostDemoSnapshot = nil
+    }
+
+    /// The whole demo: snapshot -> (bracket press/drag-out/hold/drag-back) ->
+    /// travel -> (divider press/drag-out/hold/drag-back) -> restore -> fade
+    /// out. Bypasses `GestureController` and `EditorState.beginGesture`/
+    /// `commitGesture` entirely - it mutates `state.document` (and, for the
+    /// bracket phase, `state.liveCanvasSize`) directly, the same way a real
+    /// gesture's PREVIEW does mid-drag (see GestureController's per-tick
+    /// `state.document = doc` calls) - so there is NO undo-stack entry at
+    /// any point, matching "gestures preview without pushing undo, only
+    /// commit at gesture end" (this demo never calls the "commit" half at
+    /// all, since it always ends by restoring the exact starting document
+    /// rather than keeping a change).
+    ///
+    /// Phase 1 change (Justin, 2026-07-27): this used to demo the interior
+    /// CORNER handle (where two dividers cross) first. On-device, Justin
+    /// reported that in his 2x2 layout that handle sits exactly at the
+    /// middle intersection point - so the phase read as "the middle point
+    /// moving," which he explicitly did not want, rather than the corner
+    /// drag he wanted taught ("the big one - it lets the user know they can
+    /// easily change the aspect ratio by freehand"). Phase 1 now instead
+    /// drags a canvas composition BRACKET vertex (`HitTarget.bracket`,
+    /// `bracketAnchor`) - the 44x44 zone 12pt outside each canvas corner -
+    /// which reshapes the canvas's ASPECT RATIO, exactly matching what
+    /// Justin asked to see. It drives the same `BracketInfo`/
+    /// `applyBracketDelta` free functions GestureController's real
+    /// `handleBracket` uses (see GestureController.swift's "Ratio detents
+    /// (bracket drag)" / "Bracket-drag math" sections) - same
+    /// shared-free-function pattern already established for the divider
+    /// phase below. Phase 2 (divider drag) is unchanged - Justin explicitly
+    /// approved it ("a line divider (yes this is good)").
+    ///
+    /// Autosave note: `document`'s `didSet` schedules an autosave on EVERY
+    /// assignment regardless of undo - that's pre-existing, unconditional
+    /// behavor, true of a real drag too. During this demo's ~350ms "hold"
+    /// beats (close to the 0.5s autosave debounce), it's possible for the
+    /// debounce timer to fire and write the INTERMEDIATE (mid-reshape)
+    /// document to disk before the drag-back leg starts. That's the one
+    /// place this demo can touch disk with a non-original document - it's
+    /// acceptable per Justin's brief ONLY because the final restore below
+    /// always fires another autosave with the ORIGINAL document shortly
+    /// after, so whatever's on disk once the app goes idle is correct.
+    @MainActor
+    private func runGhostGestureDemo() async {
+        let snapshot = state.document
+        ghostDemoSnapshot = snapshot
+        defer { ghostDemoSnapshot = nil }
+
+        let canvasSize = state.canvasSize
+        guard canvasSize.width > 0, canvasSize.height > 0 else {
+            hasSeenCoachMarks = true
+            return
+        }
+        let (cells, _) = solve(root: snapshot.root, canvasSize: canvasSize, border: snapshot.border)
+        let gutterPts = snapshot.border.inner * min(canvasSize.width, canvasSize.height)
+        // The bracket phase always has somewhere to land - the composition
+        // brackets are always visible regardless of layout (even a single-
+        // photo canvas has all 4) - so unlike the old corner search, there's
+        // no "no draggable geometry at all" guard needed here. Only the
+        // divider phase can be legitimately absent (a single-photo canvas
+        // has no interior seam); it degrades gracefully by simply skipping
+        // below.
+        let divider = centralDivider(cells: cells, root: snapshot.root, canvasSize: canvasSize, gutterPts: gutterPts)
+
+        let shortEdge = min(canvasSize.width, canvasSize.height)
+        // Divider travel: ~18% of the canvas's short edge, within the
+        // brief's "~15-20% of canvas" range (unchanged from before).
+        let travel = shortEdge * 0.18
+        // Bracket travel: deliberately ASYMMETRIC (not a plain diagonal at
+        // 45 degrees) so the drag visibly changes the canvas's ASPECT RATIO
+        // rather than just scaling it up uniformly - a real freehand
+        // reshape. Direction is a JUDGMENT CALL (Justin can retune): the
+        // dominant vertical component takes the canvas from its starting
+        // ratio toward a taller/portrait shape (obvious against the default
+        // square canvas), while the small horizontal component keeps the
+        // drag genuinely diagonal rather than a pure vertical pull. ~16% is
+        // the dominant axis, within the brief's "~12-18% of canvas" range.
+        let bracketDX = shortEdge * 0.06
+        let bracketDY = shortEdge * 0.16
+
+        ghostDemoAtDivider = false // always start on the bracket phase
+        withAnimation(.easeInOut(duration: 0.25)) { ghostDemoVisible = true }
+        try? await Task.sleep(nanoseconds: 300_000_000) // let the fade-in read before the first press
+
+        guard !Task.isCancelled else { return }
+        await pressPulse()
+        guard !Task.isCancelled else { return }
+        await animateBracketDrag(corner: .bottomRight, canvasSize: canvasSize, dx: bracketDX, dy: bracketDY, out: true)
+        guard !Task.isCancelled else { return }
+        try? await Task.sleep(nanoseconds: 350_000_000) // brief hold
+        guard !Task.isCancelled else { return }
+        await animateBracketDrag(corner: .bottomRight, canvasSize: canvasSize, dx: bracketDX, dy: bracketDY, out: false)
+        // Hard safety-net snap to a bit-identical original before the next
+        // phase - mirrors the old corner phase's same safety net. Also
+        // clears the bracket's live-size override so `state.canvasSize`
+        // falls back to `fitSize` computed from the just-restored ratio,
+        // exactly like a real `endBracket`'s settle.
+        state.document = snapshot
+        state.liveCanvasSize = nil
+
+        if let divider {
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.45)) { ghostDemoAtDivider = true } // travel: bracket -> divider, document untouched so this is a plain position glide
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled else { return }
+            await pressPulse()
+            guard !Task.isCancelled else { return }
+            await animateDividerDrag(ref: divider, document: snapshot, canvasSize: canvasSize, delta: travel, out: true)
+            guard !Task.isCancelled else { return }
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard !Task.isCancelled else { return }
+            await animateDividerDrag(ref: divider, document: snapshot, canvasSize: canvasSize, delta: travel, out: false)
+            state.document = snapshot
+        }
+
+        guard !Task.isCancelled else { return }
+        withAnimation(.easeInOut(duration: 0.3)) { ghostDemoVisible = false }
+        hasSeenCoachMarks = true
+    }
+
+    /// Ticks a canvas bracket drag from 0 to the full `(dx, dy)` target
+    /// (`out == true`) or back from full to 0 (`out == false`) over ~1.1s at
+    /// ~60fps - the SAME `BracketInfo`/`applyBracketDelta` free-function
+    /// pair GestureController's real bracket drag uses (see
+    /// GestureController.swift), just fed a synthetic eased time curve
+    /// instead of live per-frame touch deltas, so the aspect-ratio reshape
+    /// is mathematically identical to what a finger would produce. Mirrors
+    /// the real `handleBracket`'s per-tick contract exactly: writes
+    /// `state.document.canvasRatio` and `state.liveCanvasSize` directly, no
+    /// `reclampAll` per frame (that only happens once, at a real
+    /// `endBracket` - here the demo instead hard-restores the pristine
+    /// snapshot once the drag-back leg finishes, see `runGhostGestureDemo`).
+    /// No haptics (a silent demo), even on a preset snap -
+    /// `applyBracketDelta`'s snap flag is simply discarded.
+    @MainActor
+    private func animateBracketDrag(corner: BracketCorner, canvasSize: CGSize, dx: CGFloat, dy: CGFloat, out: Bool) async {
+        var info = BracketInfo(corner: corner, originalSize: canvasSize, snappedPresetIndex: nil)
+        await tickAnimation(duration: 1.1) { eased in
+            let t = out ? eased : (1 - eased)
+            let result = applyBracketDelta(&info, translation: CGSize(width: dx * t, height: dy * t))
+            state.document.canvasRatio = result.ratio
+            state.liveCanvasSize = result.liveSize
+        }
+    }
+
+    /// Same idea as `animateBracketDrag`, for a single divider along its own
+    /// axis.
+    @MainActor
+    private func animateDividerDrag(ref: DividerRef, document: Document, canvasSize: CGSize, delta: CGFloat, out: Bool) async {
+        var info = makeDividerInfo(ref, document: document, canvasSize: canvasSize)
+        await tickAnimation(duration: 1.1) { eased in
+            let t = out ? eased : (1 - eased)
+            var doc = document
+            if info.usableExtent > 0 { applyDividerDelta(&info, deltaPoints: delta * t, doc: &doc) }
+            state.document = reclampAll(doc, canvasSize: canvasSize)
+        }
+    }
+
+    /// Shared eased-time driver behind both animate* functions above: ~60
+    /// steps over `duration` seconds, calling `step(easedT)` with `easedT`
+    /// sweeping 0...1 through a smoothstep curve - a natural ease-in/ease-
+    /// out glide, not a linear one, so the synthetic "drag" reads like a
+    /// real finger's acceleration/deceleration rather than a robotic slide.
+    private func tickAnimation(duration: TimeInterval, _ step: (Double) -> Void) async {
+        let frameInterval = 1.0 / 60.0
+        let steps = max(Int(duration / frameInterval), 1)
+        for i in 0...steps {
+            guard !Task.isCancelled else { return }
+            let t = Double(i) / Double(steps)
+            let eased = t * t * (3 - 2 * t) // smoothstep
+            step(eased)
+            try? await Task.sleep(nanoseconds: UInt64(frameInterval * 1_000_000_000))
+        }
+    }
+
+    /// The small scale-down-then-back pulse at the start of each drag leg,
+    /// standing in for a real touch-down before the drag itself begins.
+    private func pressPulse() async {
+        withAnimation(.easeOut(duration: 0.12)) { ghostDemoPressed = true }
+        try? await Task.sleep(nanoseconds: 160_000_000)
+        withAnimation(.easeOut(duration: 0.12)) { ghostDemoPressed = false }
+        try? await Task.sleep(nanoseconds: 100_000_000)
     }
 
     // MARK: - Debug verification hook (-simulateUnavailable launch arg, DEBUG only)

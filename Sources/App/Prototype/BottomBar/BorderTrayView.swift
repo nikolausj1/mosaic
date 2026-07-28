@@ -2,17 +2,19 @@
 // Border tray (design revision, 2026-07-17): a single THICKNESS slider
 // (writes both border.inner and border.outer together - the old linked
 // Inner/Outer pair + link toggle is gone, `border.linked` stays true always)
-// + a Radius slider + a fixed six-swatch row: White, Black, three colors
-// sampled from the photos (EditorState.derivedSwatches), then a "+" that
-// opens the system color picker and applies the pick directly.
+// + a Radius slider + a fixed swatch row: White, Black, three vibrant colors
+// sampled from the photos, and the brightest sampled color (Justin,
+// 2026-07-26 - EditorState.derivedSwatches, most-to-least vibrant then
+// brightest), then a "+" that opens the system color picker and applies the
+// pick directly. That's 6 fixed swatches + "+" = 7 tappable elements in one
+// row - see `swatchRow`'s doc comment for the sizing math that keeps them
+// all on-screen at once.
 import SwiftUI
 
 private let borderFractionCeiling = 0.15
 
 struct BorderTrayView: View {
     let state: EditorState
-
-    @State private var showColorPicker = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -21,13 +23,6 @@ struct BorderTrayView: View {
         }
         .padding(.vertical, 12)
         .background(Color.mosaicSurface)
-        .sheet(isPresented: $showColorPicker) {
-            SystemColorPickerRepresentable(
-                initialColor: uiColor(from: state.document.border.color),
-                onPicked: { state.setBorderColor($0) },
-                onDismiss: { showColorPicker = false }
-            )
-        }
     }
 
     // MARK: Sliders
@@ -73,16 +68,48 @@ struct BorderTrayView: View {
 
     // MARK: Swatches
 
+    /// Seventh swatch + eyedropper (Justin, 2026-07-26): the row is now 9
+    /// elements - white, black, vibrant1-3, brightest, luminous, the B11
+    /// eyedropper, and "+". 9*38 + 8*3 + 2*10 = 386pt fits a 393pt screen;
+    /// 38pt tap targets sit slightly under the usual 40pt floor but remain
+    /// comfortable for well-spaced circles (they were 42pt at 7 elements).
+    private let swatchSpacing: CGFloat = 3
+    private let swatchTapTarget: CGFloat = 38
+    private let swatchDiameter: CGFloat = 30
+
     private var swatchRow: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: swatchSpacing) {
             swatch(.white)
             swatch(RGBA(r: 0, g: 0, b: 0, a: 1))
-            swatch(state.derivedSwatches.bright)
-            swatch(state.derivedSwatches.mid)
-            swatch(state.derivedSwatches.dark)
+            swatch(state.derivedSwatches.vibrant1)
+            swatch(state.derivedSwatches.vibrant2)
+            swatch(state.derivedSwatches.vibrant3)
+            swatch(state.derivedSwatches.brightest)
+            swatch(state.derivedSwatches.luminous)
+            eyedropperButton
             addSwatchButton
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 10)
+    }
+
+    /// B11 loupe eyedropper (Justin, 2026-07-26): arms the canvas eyedropper
+    /// AND kicks off the cached composite render the loupe magnifies from -
+    /// see EditorState.beginColorSampling and CanvasView's samplingOverlay.
+    private var eyedropperButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) { state.beginColorSampling() }
+        } label: {
+            Circle()
+                .fill(state.isSamplingColor ? Color.mosaicAccentDeep : Color.white.opacity(0.08))
+                .overlay(Circle().stroke(Color.white.opacity(0.3), lineWidth: 1))
+                .overlay(
+                    Image(systemName: "eyedropper")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                )
+                .frame(width: swatchDiameter, height: swatchDiameter)
+                .frame(minWidth: swatchTapTarget, minHeight: swatchTapTarget)
+        }
     }
 
     private func swatch(_ rgba: RGBA) -> some View {
@@ -94,14 +121,20 @@ struct BorderTrayView: View {
                 .fill(Color(red: rgba.r, green: rgba.g, blue: rgba.b, opacity: rgba.a))
                 .overlay(Circle().stroke(Color.black.opacity(0.35), lineWidth: 1))
                 .overlay(Circle().stroke(Color.mosaicAccent, lineWidth: isActive ? 2 : 0))
-                .frame(width: 36, height: 36)
-                .frame(minWidth: 44, minHeight: 44)
+                .frame(width: swatchDiameter, height: swatchDiameter)
+                .frame(minWidth: swatchTapTarget, minHeight: swatchTapTarget)
         }
     }
 
     private var addSwatchButton: some View {
         Button {
-            showColorPicker = true
+            // Presented straight from UIKit, not a SwiftUI sheet - the
+            // system eyedropper crashes when its presenting sheet tears
+            // down mid-sample. See SystemColorPicker's doc comment.
+            SystemColorPicker.present(
+                initialColor: uiColor(from: state.document.border.color),
+                onPicked: { state.setBorderColor($0) }
+            )
         } label: {
             Circle()
                 .fill(Color.white.opacity(0.08))
@@ -111,8 +144,8 @@ struct BorderTrayView: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.8))
                 )
-                .frame(width: 36, height: 36)
-                .frame(minWidth: 44, minHeight: 44)
+                .frame(width: swatchDiameter, height: swatchDiameter)
+                .frame(minWidth: swatchTapTarget, minHeight: swatchTapTarget)
         }
     }
 

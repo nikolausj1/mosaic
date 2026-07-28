@@ -71,6 +71,11 @@ enum DocumentStore {
 
     static func deleteCurrent() { try? FileManager.default.removeItem(at: currentURL) }
 
+    /// Nothing-is-destructive navigation (Justin, 2026-07-26): mirrors
+    /// `hasLastCollage` below - lets the picker show a "Continue current
+    /// collage" row whenever there's an in-flight collage to go back to.
+    static var hasCurrentCollage: Bool { FileManager.default.fileExists(atPath: currentURL.path) }
+
     // MARK: - last.json
 
     static func loadLast() -> Document? { load(from: lastURL) }
