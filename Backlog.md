@@ -133,6 +133,13 @@ These could be settled by dumping strings/resources from an Android APK, **which
 v1 has nothing to configure by design (dark always, no resolution picker, zero-config auto-framing). Candidates that would eventually justify one: watermark toggle (v2 StoreKit), restore purchases (v2), haptics toggle, about/licenses. When one materializes, the ingress is a gear icon in the PICKER header (Screen A) - the editor's chrome budget is spent.
 **Revisit signal:** the first real setting arrives (likely v2's purchase restore).
 
+### B32 - Magic Layout (the buildable item: transition + decision + theater)
+**This is the one to kick off.** B30 (face-aware auto-layout) and B31 (the reveal) are the why and the what; **`Magic Layout Spec.md` at the project root is the how**, written to be started immediately without re-deriving anything.
+**What it covers:** the picker-to-canvas transition, the face-aware layout decision, and the reveal animation, as one feature.
+**Architecture decision already made (do not relitigate):** the animation is hosted in a full-screen overlay owned by `ContentView`, above both the picker and the editor. The picker owns the source thumbnail frames but is torn down at handoff; the editor owns the destination geometry but does not exist until commit; only `ContentView` outlives both. Alternatives considered and rejected are recorded in the spec.
+**Phasing:** Phase 0 dramatizes the framing that ALREADY happens, needs no algorithm work, and is the cheap test of whether the theater lands - **stop and judge there before investing further**. Phase 1 is the pure-Engine decision (smoke-testable). Phase 2 adds divider search. Phase 3 is the full theater plus a re-run affordance. Phase 4 is tuning against a real camera roll, which is where most of the calendar time goes.
+**Biggest risk:** this is arrival, the app's first impression, stacked on top of B20 which is already the riskiest shipped feature.
+
 ### B31 - "Magic layout" reveal: show the work so the app gets credit for it
 **Idea (Justin, 2026-07-28):** photos land in a deliberately plain template, then a sweep of "magic energy" crosses the composition, real face bounding boxes light up, and the layout morphs - ghost-demo style - into the chosen one. All on device. "This animation and these steps are Theater, but it is to get the wow from our users."
 **Why it is right:** the app already does the impressive thing (on-device Vision framing) and the user perceives nothing, because it is instant and invisible. Invisible work earns no credit. This is also the single best 15 seconds of an App Store preview video and the clearest demonstration of the "innovation" criterion in the featuring pitch.

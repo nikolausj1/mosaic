@@ -1,0 +1,131 @@
+---
+title: "Magic Layout - Build Spec"
+created: 2026-07-28
+modified: 2026-07-28
+version: 1.0
+author: Claude Fable 5 (claude-fable-5)
+tags:
+---
+
+# Magic Layout - Build Spec
+
+Kick-off-ready spec for Backlog **B32**, which consolidates **B30** (face-aware auto-layout) and **B31** (the reveal). Read this top to bottom before writing code. It is written so a competent worker with simulator access can start immediately without re-deriving decisions.
+
+## The pitch, in one paragraph
+
+The four chosen photos fly in from the picker grid as raw thumbnails, get scanned on device (real face boxes light up on the real detections), and morph into a layout the app actually chose for those faces. Today all of that work happens invisibly behind a spinner, so the user credits the app with nothing. This makes the work visible, turns the picker-to-editor cut into a transition worth watching, and hands us the single best fifteen seconds of an App Store preview video.
+
+## Scope
+
+In scope: the picker-to-canvas transition, the face-aware layout decision, and the reveal animation, as one coherent feature.
+
+Explicit non-goals: no server, no model training, no change to the 2-4 photo cap, no template browser, no change to the export pipeline.
+
+## What already exists (do not rebuild these)
+
+| Piece | Where | Notes |
+|---|---|---|
+| Face + saliency detection | `Sources/App/Library/PhotoLibraryService.swift:142+` | `VNDetectFaceRectanglesRequest` + `VNGenerateAttentionBasedSaliencyImageRequest`, already running per photo at pick time |
+| Pure framing math | `Sources/Engine/AutoFrame.swift` | Takes `faces: [CGRect]`, `faceConfidences`, `salientRegion`, all normalized top-left. Already thresholds faces at confidence 0.5 and 8 percent of the short edge |
+| Template list | `Sources/Engine/Templates.swift` `templates(for:)` | The candidate set to search over |
+| Assignment search | `Sources/Engine/Assignment.swift` `contentFitAssignment` | Brute force over <= 24 permutations, currently scored by ASPECT match only |
+| Layout solve | `Sources/Engine/Layout.swift` `solve(root:canvasSize:border:)` | Gives cell rects for a template |
+| Document build | `Sources/App/Library/PickerView.swift:245` `buildDocument` | Async, shows "Framing your photos..." |
+| The seam we replace | `PickerView.loadingOverlay` (~line 1127) | A black 0.6 scrim plus a spinner, shown during exactly the work we want to dramatize |
+| Choreography precedent | `EditorView.runGhostGestureDemo` + `Sources/App/Onboarding/CoachMarks.swift` | Async keyframe loop, snapshot/restore, skip catcher, Reduce Motion handling. Copy these patterns |
+| Geometry export precedent | `CanvasView.coachMarkAnchorMarkers` | How live rects reach an overlay. NOTE the rule: `anchorPreference` attaches to the SIZED child BEFORE `.position`, never after |
+
+## Architecture decision (the crux - already made)
+
+**Host the animation in a full-screen `MagicLayoutOverlay` owned by `ContentView`, above both the picker and the editor.**
+
+Why this and not the alternatives:
+
+- The **picker** owns the source geometry (thumbnail frames) but is torn down at handoff.
+- The **editor** owns the destination geometry but does not exist until `commitNewCollage` runs.
+- Neither view can own an animation that spans both. `ContentView` outlives both, so an overlay there can hold the source frames, run the whole sequence, and fade out onto an already-mounted editor.
+
+Rejected: running it inside `PickerView` and relying on an invisible cut into the editor (fragile - the two canvas rects must match to the pixel or the handoff pops). Rejected: hoisting a `matchedGeometryEffect` namespace into `ContentView` (couples all three views and fights the existing `if let editorState` swap).
+
+The overlay needs exactly three inputs:
+
+1. **Source frames + images** - each selected thumbnail's frame in global coordinates, published from `PickerView` via a `PreferenceKey` at confirm time.
+2. **The finished document** - `Document` + `[PhotoID: UIImage]` from `buildDocument`, plus the destination cell rects from `solve()` against the editor's canvas size.
+3. **The face rects** - per photo, normalized, already available from `PhotoLibraryService`. These must be plumbed out of `buildDocument` rather than discarded (today only the derived `ROI` survives).
+
+Handoff: the overlay runs while `commitNewCollage` mounts the editor underneath it, then crossfades out onto the editor's first frame.
+
+## Phases
+
+Each phase is independently shippable and independently verifiable. Do them in order.
+
+### Phase 0 - Dramatize what already happens (no algorithm work)
+
+The cheap test of whether the theater lands. No `B30` needed.
+
+- Replace `loadingOverlay` with the overlay above.
+- Thumbnails fly from their picker positions into the cell rects of the CURRENT (aspect-chosen) template.
+- Real face boxes appear on the photos where Vision found them.
+- Each cell settles into the crop `autoFrame` already chose.
+- Crossfade to the editor.
+
+Acceptance: the sequence plays end to end on a real pick, any touch skips instantly to the finished editor, Reduce Motion cuts straight through, and total added wall-clock over today's spinner is under 400ms.
+
+**Stop here and judge.** If the theater does not delight at this stage, the algorithm work will not save it.
+
+### Phase 1 - The real decision (Engine, pure, testable)
+
+This is `B30`'s core. All of it lives in `Sources/Engine`, which is platform-pure and covered by the standalone smoke test.
+
+1. **Must-keep region.** Union of surviving face rects (reuse `AutoFrame.swift`'s existing confidence and size thresholds) plus a margin. Fall back to `salientRegion` when no face survives, and to nil when neither exists (landscapes must keep working).
+2. **`framingCost(mustKeep:photoPixelSize:cellAspect:) -> Double`.** Find the minimum zoom whose crop still contains the must-keep region, then penalize: any face clipped (heaviest), face height below a minimum fraction of cell height, excessive crop loss, and must-keep aspect far from cell aspect. Reward the opposite. Deterministic, no randomness.
+3. **Search templates and assignments together.** For each candidate from `templates(for:)`, solve for cell rects, run the existing permutation search but scored by `framingCost` instead of aspect distance, and keep the best pair. Roughly 10 templates times 24 permutations for four photos, all rect arithmetic, no second Vision pass.
+4. **Degrade to today's behavior** when no photo yields a must-keep region, so the change is a strict improvement rather than a replacement.
+
+Acceptance: new smoke-test assertions covering a clipped-face case, a group-shot-wants-a-wider-cell case, a no-faces landscape case, and determinism (same input, same output, twice). Existing 174 assertions still pass. Measured decision time under 20ms for four photos on device.
+
+### Phase 2 - Divider search (the real unlock)
+
+Let each divider move within roughly 0.3 to 0.7 in coarse steps (5 positions is plenty) nested inside the Phase 1 search, so a cell can GROW to fit a group shot rather than cropping it. Keep the total evaluation count in the low thousands and measure it.
+
+Acceptance: a group photo that Phase 1 still clips now gets a taller or wider cell instead. Decision time still under 60ms.
+
+### Phase 3 - The full theater
+
+Rebuild the Phase 0 sequence against the real decision, and add the re-run affordance.
+
+Beats, with the constraint that the whole thing is an overlay on an already-finished result:
+
+1. **Arrive** (~250ms) - thumbnails appear at their picker positions, everything else dims.
+2. **Scan** (tie to real work, cap at ~700ms) - a sweep passes over the photos and the real face boxes light up as they are found. If Vision finished earlier, this is a re-enactment, which is fine. Never hold purely for show when the result is ready.
+3. **Assemble** (~700ms) - thumbnails fly and morph into their chosen cells. **Animate the crop, not just the frame**: picker thumbnails are square crops and final cells are varied aspects with their own crops, so a frame-only morph will visibly jump at the end.
+4. **Settle** (~250ms) - boxes fade, border and chrome resolve, crossfade to the editor.
+
+**Re-run affordance** (this replaces B31's original revert-toggle, which meant "make it worse"): a control that replays the sequence and lands on the NEXT-best scoring layout. Forward, not backward. Manual escape already exists in the Layout tab; Undo covers regret.
+
+Rationing: full sequence on the first-ever collage, a shortened version afterwards, plus a Settings toggle. Any touch jumps to the end state. Reduce Motion skips entirely.
+
+Degradation: if detection is weak or finds fewer faces than expected, skip the box-reveal beat and just assemble. Never advertise a miss.
+
+### Phase 4 - Tune against a real camera roll
+
+The long pole, and it is judgment rather than engineering. Budget most of the calendar time here. Pair it with the `B26` device pass.
+
+## Verification plan
+
+- **Engine**: extend `Tests/SmokeTest.swift` (`swiftc -O Sources/Engine/*.swift Tests/SmokeTest.swift` per the Build Guide). This is the main safety net and it is cheap.
+- **Animation**: simulator screenshot sequences, the pattern used throughout this project. Launch with `-resetPersistence -autoPick 4`, capture at ~0.3s intervals in a background loop, and assert on measured geometry rather than eyeballing.
+- **Timing**: measure and report added wall-clock against today's spinner. It is a regression if the app feels slower.
+- **On device**: the animation must be judged on a phone, not the simulator.
+
+## Risks
+
+- **This is arrival, the app's first impression**, layered on top of `B20` (auto-zoom), already flagged as the riskiest shipped feature. A bad frame here is the first thing every new user sees.
+- **Perceived slowness.** The mitigation is that the animation covers work that genuinely takes time. If it ever waits on nothing, cut it.
+- **Async photo loading**: full-resolution images arrive after the proxies. The overlay must animate proxies and never pop.
+- **Vision misses** on profiles, sunglasses, and small faces. Handled by the degradation rule, but it needs real-library evidence.
+- **Over-optimization looks mechanical.** A "good enough" threshold that keeps the current aesthetic default may beat a strict optimum. Watch for layouts that are technically optimal and visually cold.
+
+## Honesty line (settled 2026-07-28)
+
+The starting state asserts nothing, so it does not need to be a "real" alternative layout - raw thumbnails assembling make no comparative claim. What must stay true: **the final layout is genuinely the one the algorithm chose, and the boxes are genuinely what Vision found.** Separately, do not build a before/after comparison in marketing framed as "what you would get without the AI" - that is where a real claim would start. See `Backlog.md` B31 for the full reasoning.
