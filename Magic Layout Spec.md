@@ -2,7 +2,7 @@
 title: "Magic Layout - Build Spec"
 created: 2026-07-28
 modified: 2026-07-28
-version: 1.1
+version: 1.2
 author: Claude Fable 5 (claude-fable-5)
 tags:
 ---
@@ -124,6 +124,18 @@ The long pole, and it is judgment rather than engineering. Budget most of the ca
 - **Phase 0 - DONE 2026-07-28.** `Sources/App/MagicLayout/MagicLayoutOverlay.swift` plus plumbing. Verified on simulator with real taps.
   - **Timing missed the budget: ~1.4s added, not 400ms.** The arrive and scan beats are free (they cover `loadForEditing` + Vision), but box reveal + assemble + settle can only run after the result exists. The spec's own beat budget (1900ms) only fits inside 400ms if the covered work takes >= 1.5s, and it does not. Levers: overlap the settle with the assemble tail (-250ms), shorten assemble to ~450ms (-250ms), stream Vision per photo so boxes light DURING the scan (-350ms). **Recommendation: ration instead of trimming - keep the full show for the first collage, cut hard for later ones - which is Phase 3's rationing brought forward.**
   - **Finding: Vision is dead in the iOS Simulator** ("Failed to create espresso context"), and the error was previously swallowed and returned as "no faces". Every simulator run has been exercising the center-fill fallback, so all prior simulator-based judgement of B20 auto-framing was of the fallback, not the feature. A CPU-only retry (after the default throws only, never on device) fixes it. **This retroactively weakens any auto-framing conclusion drawn from a simulator before 2026-07-28.**
+
+## Current state (2026-07-28, end of day)
+
+- **Phase 0 - DONE and committed.** Overlay, transition, scan, assemble.
+- **Phase 1 - DONE, committed, and WIRED IN.** `buildDocument` now runs two passes: gather each photo's `mustKeepRegion`, then call `faceAwareAssignment` in place of `defaultTemplateIndex` + `contentFitAssignment`. Faces choose the layout.
+- **The reveal now shows causality.** Each detected face gets a glowing square and the destination cells resolve WHILE the glows are lit, so the arrangement visibly follows from the faces. At the end all theater clears and the editor's drag handles arrive, handing control back.
+- **Verified 2026-07-28** on simulator with two portraits: five faces detected and glowed, resolved to a stacked layout keeping every face whole, clean handoff. Debug + Release build; smoke test 219/219. **Installed on Justin's device.**
+- **Phase 2 - IN PROGRESS** (divider search). Seam is marked in `MagicLayout.swift`.
+- **Phase 3/4 - not started.** Rationing, the re-run affordance, and tuning against a real camera roll.
+
+### Unverified, and worth checking first on device
+Skip-on-touch and Reduce Motion after the glow rework; the "never glow a face the final layout clips" rule; and the added wall clock (last measured at ~1.4s BEFORE the glow beat, so likely longer now). Justin's call on pacing is the open decision - recommendation on record is to ration (full show on the first collage, short after) rather than trim uniformly.
 
 ## Risks
 

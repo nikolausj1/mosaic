@@ -2,7 +2,7 @@
 title: "STATUS - Photo Collage"
 created: 2026-07-24
 modified: 2026-07-28
-version: 2.4
+version: 2.5
 author: Claude Fable 5 (claude-fable-5)
 tags:
 ---
@@ -41,7 +41,9 @@ Active Development (Phase 6 of 7 complete; Phase 7, visual polish, in progress)
       - unblocks: closing the picker performance report
 - [ ] **Judge the teach + eyedropper rework (2026-07-26 late night, deployed)**: first-run coach marks are GONE, replaced by a ghost gesture demo - a translucent fingertip drags the corner and then a seam on the user's own collage, live, then restores it exactly (tap skips; Dev sheet replay still works); the border eyedropper now has a proper magnifier loupe - touch and drag on the collage, a mag circle with crosshair and live color ring follows, release to apply (~5 min)
       - unblocks: closing the first-run teaching design and B11 for good
-- [ ] **Judge B32 Magic Layout Phases 0 + 1 (built 2026-07-28, NOT yet on your phone)** - the picker-to-editor cut is now a sequence: chosen photos stay lit in place while the rest dims, real face boxes light up, then they fly and morph into their cells. Phase 1's face-aware layout decision is built and tested in the Engine but not yet wired to the animation. **Two decisions waiting on you: the added wall clock is ~1.4s, not the spec's 400ms budget (see Ship Plan / my recommendation: keep the full show for the first collage only and cut later ones), and whether to wire Phase 1 in now or after you have felt Phase 0 on device.**
+- [ ] **Judge B32 Magic Layout on your phone (INSTALLED 2026-07-28)** - faces now choose the layout AND you can watch them do it: glowing squares on each detected face, the arrangement resolving while they burn, then all theater clearing as the drag handles return. Unverified and worth checking first: skip-on-touch, Reduce Motion, the do-not-glow-a-clipped-face rule, the added wall clock, and whether the layout CHOICES look right on your own photos (scoring weights are placeholders). Full checklist: https://claude.ai/code/artifact/305b73b7-df5c-4e5b-8c15-4ed499e89625
+      - unblocks: Phase 3 (rationing + re-run affordance) and Phase 4 (tuning)
+- [ ] ~~Judge B32 Magic Layout Phases 0 + 1 (built 2026-07-28, NOT yet on your phone)~~ SUPERSEDED - the picker-to-editor cut is now a sequence: chosen photos stay lit in place while the rest dims, real face boxes light up, then they fly and morph into their cells. Phase 1's face-aware layout decision is built and tested in the Engine but not yet wired to the animation. **Two decisions waiting on you: the added wall clock is ~1.4s, not the spec's 400ms budget (see Ship Plan / my recommendation: keep the full show for the first collage only and cut later ones), and whether to wire Phase 1 in now or after you have felt Phase 0 on device.**
       - unblocks: Phase 2 (divider search) and Phase 3 (rationing + re-run affordance)
 - [ ] **Judge the tap-bug fix + bracket demo (2026-07-27, deployed)**: the wrong-photo-selected bug is ROOT-CAUSED and fixed - the collapsing hero header sat above the grid's ScrollView, so collapsing it shrank the layout ~72pt and slid the grid under your finger mid-tap (intermittent because it only bit while the hero was collapsing near the top). The hero is now a fixed-height brand moment, no collapse; verified with a 48-photo numbered test library, four consecutive select/deselect operations all landing exactly, including immediately after a scroll. Also: the inactive CTA is now truly opaque (SwiftUI's .disabled() was dimming the whole button, including the opaque fill); and the ghost demo now drags a CANVAS CORNER BRACKET to reshape the aspect ratio freehand instead of the interior middle point (~10 min)
       - unblocks: closing the selection-bug report for good; if you still want the hero to shrink on scroll, it has to move INSIDE the scroll view as content - say the word
