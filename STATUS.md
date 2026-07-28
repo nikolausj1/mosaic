@@ -2,7 +2,7 @@
 title: "STATUS - Photo Collage"
 created: 2026-07-24
 modified: 2026-07-28
-version: 2.2
+version: 2.3
 author: Claude Fable 5 (claude-fable-5)
 tags:
 ---
@@ -84,12 +84,25 @@ Auto-framing quality (B20) is the one feature that can silently embarrass the ap
 
 ## App Store Readiness
 
-- [ ] Full B26 device pass (nothing has shipped to the Store without this)
-- [ ] Resolve B27 (onboarding), can't submit with an open product-behavior question
-- [ ] Finish Phase 7: final accent color + icon locked in from mockups
-- [ ] Privacy nutrition label (Photos access, on-device-only processing, should be a short/clean one, no network calls exist)
-- [ ] App Store screenshots (none generated yet)
-- [ ] App Store listing copy (name, description, keywords), not started
-- [ ] Decide in/out for v2 items currently excluded from v1: **StoreKit/paid unlock + watermark (B8)**, if this is meant to be a paid app or freemium at launch, that's a real chunk of unbuilt work, not polish
-- [ ] TestFlight pass with at least one person besides you
-- [ ] Final pass on Backlog "reversible decisions" (B1, B3, B4, B5, B6), confirm none need flipping before wide release
+Done (2026-07-28)
+- [x] Apple Developer Program, Paid Apps Agreement, banking, W-9, EU trader status - all Active
+- [x] App Store Connect record: "Mosaic: Photo Collage & Layout", Apple ID 6795437010, bundle com.levelup.mosaic, SKU mosaic-ios-001 (App ID had to be registered first - Xcode never created it)
+- [x] Privacy policy + support pages live: https://nikolausj1.github.io/mosaic-app-site/privacy.html and /support.html
+- [x] App Store listing copy drafted (`App Store Listing.md`)
+- [x] Screenshots: five 6.9" (1320x2868) shots in `_store/screenshots/`
+- [x] App icon dark + tinted appearance variants (verified compiled via assetutil)
+- [x] Submission config: no personal photos or debug launch args in Release, automatic signing, one version source, PrivacyInfo.xcprivacy, Photography category
+- [x] Working tree committed (7 commits, 2026-07-27/28)
+
+Still to do
+- [ ] **Justin: run the B26 device checklist** - https://claude.ai/code/artifact/305b73b7-df5c-4e5b-8c15-4ed499e89625
+- [ ] **Justin: one TestFlight tester besides you**
+- [ ] **Justin: set the real price** for the Remove Watermark unlock ($2.99 is a placeholder) and create the IAP product in App Store Connect
+- [ ] Fill the App Store Connect listing fields from `App Store Listing.md` + upload screenshots
+- [ ] Privacy nutrition label answers (no data collected, no tracking) - trivial, entered in App Store Connect
+- [ ] Age rating questionnaire
+- [ ] **Gate the Settings dev rows behind #if DEBUG** ("Replay first-run experience" / "Clear collages" currently ship in Release at Justin's request)
+- [ ] Archive + upload a build, then TestFlight
+- [ ] Featuring nomination (~3 months of lead time recommended; pitch drafted in `App Store Listing.md`)
+
+Open risk: the "Mosaic" trademark question stays accepted-but-unresolved (13 leading matches, plus an existing App Store app in the category). The compound title helps discovery, not legal exposure.
