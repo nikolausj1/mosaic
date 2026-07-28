@@ -8,8 +8,10 @@ import UIKit
 struct SaveSheetView: View {
     let result: SaveResult
     var onDone: () -> Void
+    var storeService: StoreService
 
     @State private var showShareSheet = false
+    @State private var showPaywall = false
 
     var body: some View {
         VStack(spacing: 20) {
@@ -32,6 +34,13 @@ struct SaveSheetView: View {
                 Text("\(Int(result.pixelSize.width)) x \(Int(result.pixelSize.height))")
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.6))
+            }
+
+            // B8: the only disclosure of the watermark in the whole app -
+            // the live editor canvas never previews it (deliberate, PRD
+            // "quiet UI"). Entitled users see nothing here at all.
+            if !storeService.isUnlocked {
+                watermarkNotice
             }
 
             Spacer(minLength: 0)
@@ -67,6 +76,24 @@ struct SaveSheetView: View {
         .background(Color.mosaicBackground.ignoresSafeArea())
         .sheet(isPresented: $showShareSheet) {
             ActivityView(activityItems: [shareFileURL() ?? result.jpegData])
+        }
+        .sheet(isPresented: $showPaywall) {
+            PaywallSheet(storeService: storeService)
+        }
+    }
+
+    private var watermarkNotice: some View {
+        HStack(spacing: 6) {
+            Text("Saves with a small Mosaic watermark")
+                .font(.footnote)
+                .foregroundStyle(.white.opacity(0.5))
+            Button {
+                showPaywall = true
+            } label: {
+                Text("Remove")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Color.mosaicAccent)
+            }
         }
     }
 

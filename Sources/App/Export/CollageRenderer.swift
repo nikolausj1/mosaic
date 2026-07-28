@@ -79,6 +79,20 @@ struct CollageRenderer {
         return .failure(.renderFailed)
     }
 
+    /// Small fixed-size render for the Border tray's canvas eyedropper (B11,
+    /// Justin 2026-07-26): same drawing math as export so a sampled pixel is
+    /// exactly what Save would produce at that spot, but at a caller-chosen
+    /// small size with the in-memory proxies - no retry ladder, no decorator
+    /// concerns (callers construct a fresh renderer whose decorator defaults
+    /// to NoOp).
+    func renderForSampling(
+        document: Document,
+        exportSize: CGSize,
+        imageProvider: @escaping CollageImageProvider
+    ) async -> UIImage? {
+        await attemptRender(document: document, exportSize: exportSize, imageProvider: imageProvider)
+    }
+
     // MARK: - One render attempt
 
     private func attemptRender(
