@@ -675,6 +675,12 @@ struct PickerView: View {
                     .frame(height: mastheadCompactLockupHeight * 2.2)
                     .matchedGeometryEffect(id: "lockup", in: lockupNamespace)
                     .allowsHitTesting(false)
+                    // Breathing room below the lockup (Justin, 2026-07-28 -
+                    // "move the text down a bit to give some padding below
+                    // the logo"): on top of the VStack's own 28pt spacing,
+                    // so the rows land a deliberate ~48pt below the lockup
+                    // instead of the old cramped 28pt.
+                    .padding(.bottom, 20)
 
                 // Present the whole time (not just at `.welcomeText`/
                 // `.welcomeReady`) so each row's own staggered `.animation`
@@ -757,7 +763,17 @@ struct PickerView: View {
         // No `.pick`-mode guard needed here - `masthead` itself is only ever
         // shown in `.pick` mode (see `body` above).
         .overlay(alignment: .topTrailing) {
+            // Hidden until arrival (Justin, 2026-07-28 - "dont show the gear
+            // icon on the loading/splash screen"): the gear has no business
+            // being tappable over the welcome/splash lockup, and popping in
+            // the instant `.arrived` lands read as an ugly snap next to the
+            // rest of that transaction's spring, so it fades in on the same
+            // ambient animation as the header/content `Group` below rather
+            // than getting its own explicit `.animation` - matching that
+            // Group's pattern exactly.
             settingsButton
+                .opacity(launchPhase == .arrived ? 1 : 0)
+                .allowsHitTesting(launchPhase == .arrived)
         }
     }
 
