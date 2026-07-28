@@ -1,21 +1,33 @@
 // Sources/Engine/MagicLayout.swift
-// B32 Phase 1 ("Magic Layout" - the face-aware layout DECISION). Pure
-// Foundation, no SwiftUI/UIKit/Photos/Vision - same rules as the rest of
-// Sources/Engine. See `Magic Layout Spec.md` (project root) and Backlog.md
-// B30/B32 for the why; this file is the how.
+// B32 Phase 1 + Phase 2 ("Magic Layout" - the face-aware layout DECISION).
+// Pure Foundation, no SwiftUI/UIKit/Photos/Vision - same rules as the rest
+// of Sources/Engine. See `Magic Layout Spec.md` (project root) and
+// Backlog.md B30/B32 for the why; this file is the how.
 //
-// Three pieces, in the order the spec lists them:
-//   1. `mustKeepRegion(...)`  - what a crop must not cut into.
-//   2. `framingCost(...)`     - how bad a given cell shape is for that region.
-//   3. `faceAwareAssignment(...)` - search templates + permutations by that cost.
-//
-// PHASE 2 IS NOT HERE. Divider-position search (letting a cell's fractions
-// move, not just which template/permutation wins) is explicitly deferred -
-// see the seam comment on `faceAwareAssignment` below.
+// Four pieces, in the order the spec lists them:
+//   1. `mustKeepRegion(...)`       - what a crop must not cut into.
+//   2. `framingCost(...)`         - how bad a given cell shape is for that
+//      region.
+//   3. `faceAwareAssignment(...)` - search templates + permutations by that
+//      cost, using each candidate's AUTHORED fractions.
+//   4. Phase 2's divider-fraction search - `searchDividerFractions(...)`,
+//      nested inside #3's per-template loop (see that function's own
+//      comment for the search shape, the pruning, and why it stays
+//      bounded).
 import Foundation
 #if canImport(CoreGraphics)
 import CoreGraphics
 #endif
+
+/// Instrumentation only - counts every (template, fraction-candidate,
+/// permutation) triple `faceAwareAssignment` has actually scored since
+/// process start. Exists purely so the smoke test (and the Phase 2 build
+/// log) can report REAL evaluation counts against the spec's "low
+/// thousands" / under-60ms budget instead of an estimate. Reading or
+/// resetting it never affects search behavior or its result - it is
+/// incremented alongside a cost computation that already happens, never
+/// used to decide anything.
+var magicLayoutEvaluationCount = 0
 
 // MARK: - 1. Must-keep region
 
@@ -210,12 +222,15 @@ struct FaceAwareAssignment: Equatable {
 /// drives any decision - every dictionary here is a lookup table, keyed by
 /// values already fixed by `photos`'s own (caller-supplied, ordered) list.
 ///
-/// PHASE 2 SEAM (do not implement here): this only tries each template's
-/// AUTHORED fractions. A follow-up phase can nest a coarse divider-fraction
-/// search (~0.3...0.7 in 5 steps, see `Magic Layout Spec.md`'s Phase 2)
-/// inside the `for (templateIndex, template) in candidates.enumerated()`
-/// loop below - re-solving at each candidate fraction set before scoring -
-/// without changing this function's signature or its callers.
+/// PHASE 2: for each candidate, after finding the best permutation at that
+/// template's AUTHORED fractions (below), `searchDividerFractions` gets a
+/// chance to move that template's own dividers and re-score before this
+/// template competes with the others - see that function's doc comment for
+/// the search shape and its pruning. The chosen fractions live directly in
+/// the returned `FaceAwareAssignment.template` (no new field): the App
+/// layer already only ever reads `result.template` and feeds it straight to
+/// `solve(...)`, so a template whose fractions were adjusted is, from that
+/// call site's point of view, just another template.
 func faceAwareAssignment(
     photos: [PhotoID],
     photoSizes: [PhotoID: CGSize],
@@ -239,7 +254,9 @@ func faceAwareAssignment(
     // both the 3- and 4-photo mixed sets). Without this guard, adding
     // face-awareness would silently relayout every faceless collage
     // (landscapes, screenshots, food) - the exact "replacement, not
-    // improvement" outcome the spec rules out.
+    // improvement" outcome the spec rules out. THIS GUARD RETURNS BEFORE
+    // Phase 2's divider search ever runs, so a faceless set never enters it
+    // either - the degrade stays byte-identical to Phase 1, and to today.
     let hasAnyMustKeep = photos.contains { mustKeepRegions[$0] != nil }
     guard hasAnyMustKeep else {
         let index = defaultTemplateIndex(orientations: photos.map { photoSizes[$0] ?? CGSize(width: 1, height: 1) })
@@ -264,44 +281,289 @@ func faceAwareAssignment(
         // own style rather than assuming the contract from a distance.
         let originalOrder = photoIDs(in: template)
 
-        let (cells, _) = solve(root: template, canvasSize: canvasSize, border: border)
-        let cellByID = Dictionary(uniqueKeysWithValues: cells.map { ($0.id, $0.rect) })
-        let slotAspects: [Double] = originalOrder.map { id in
-            cellByID[id].map { aspect($0) } ?? 1
-        }
+        let (authoredPermutation, authoredCost) = bestPermutationAndCost(
+            for: template,
+            originalOrder: originalOrder,
+            photoSizes: photoSizes,
+            mustKeepRegions: mustKeepRegions,
+            canvasSize: canvasSize,
+            border: border
+        )
 
-        var bestPermCost = Double.infinity
-        var bestPermutation = originalOrder
+        // PHASE 2 (see `searchDividerFractions`'s own comment): let this
+        // template's own dividers move and see if any coarse position beats
+        // what the authored fractions just scored above. Never worse than
+        // `authoredCost` - a candidate only replaces the running best on a
+        // strict improvement.
+        let (finalTemplate, finalPermutation, finalCost) = searchDividerFractions(
+            template: template,
+            originalOrder: originalOrder,
+            authoredPermutation: authoredPermutation,
+            authoredCost: authoredCost,
+            photoSizes: photoSizes,
+            mustKeepRegions: mustKeepRegions,
+            canvasSize: canvasSize,
+            border: border
+        )
 
-        for perm in permutations(originalOrder) {
-            var cost = 0.0
-            for slot in 0..<perm.count {
-                let photoID = perm[slot]
-                let cellAspect = slotAspects[slot]
-                guard cellAspect > 0 else { continue }
-
-                if let mustKeep = mustKeepRegions[photoID] {
-                    let pixelSize = photoSizes[photoID] ?? CGSize(width: 1, height: 1)
-                    cost += framingCost(mustKeep: mustKeep, photoPixelSize: pixelSize, cellAspect: cellAspect)
-                } else {
-                    let photoAspect = aspect(photoSizes[photoID] ?? CGSize(width: 1, height: 1))
-                    guard photoAspect > 0 else { continue }
-                    cost += FramingCostWeight.aspect * abs(log(photoAspect) - log(cellAspect))
-                }
-            }
-            if cost < bestPermCost {
-                bestPermCost = cost
-                bestPermutation = perm
-            }
-        }
-
-        if bestPermCost < bestCost {
-            bestCost = bestPermCost
+        if finalCost < bestCost {
+            bestCost = finalCost
             bestTemplateIndex = templateIndex
             var cursor = 0
-            bestTemplate = replacingLeavesInOrder(template, with: bestPermutation, cursor: &cursor)
+            bestTemplate = replacingLeavesInOrder(finalTemplate, with: finalPermutation, cursor: &cursor)
         }
     }
 
     return FaceAwareAssignment(templateIndex: bestTemplateIndex, template: bestTemplate, cost: bestCost)
+}
+
+/// Solves `template` once at `canvasSize`/`border` and brute-forces every
+/// permutation of `originalOrder` into its slots, scored exactly the way
+/// `faceAwareAssignment`'s own loop body always has (must-keep photos via
+/// `framingCost`, everyone else via the aspect-distance fallback). Factored
+/// out so Phase 2's `searchDividerFractions` can score a fraction-adjusted
+/// tree with the EXACT same cost function `faceAwareAssignment` uses for a
+/// template's authored fractions - not a similar one.
+private func bestPermutationAndCost(
+    for template: Node,
+    originalOrder: [PhotoID],
+    photoSizes: [PhotoID: CGSize],
+    mustKeepRegions: [PhotoID: CGRect],
+    canvasSize: CGSize,
+    border: BorderStyle
+) -> (permutation: [PhotoID], cost: Double) {
+    let (cells, _) = solve(root: template, canvasSize: canvasSize, border: border)
+    let cellByID = Dictionary(uniqueKeysWithValues: cells.map { ($0.id, $0.rect) })
+    let slotAspects: [Double] = originalOrder.map { id in
+        cellByID[id].map { aspect($0) } ?? 1
+    }
+
+    var bestPermCost = Double.infinity
+    var bestPermutation = originalOrder
+
+    for perm in permutations(originalOrder) {
+        var cost = 0.0
+        for slot in 0..<perm.count {
+            let photoID = perm[slot]
+            let cellAspect = slotAspects[slot]
+            guard cellAspect > 0 else { continue }
+
+            if let mustKeep = mustKeepRegions[photoID] {
+                let pixelSize = photoSizes[photoID] ?? CGSize(width: 1, height: 1)
+                cost += framingCost(mustKeep: mustKeep, photoPixelSize: pixelSize, cellAspect: cellAspect)
+            } else {
+                let photoAspect = aspect(photoSizes[photoID] ?? CGSize(width: 1, height: 1))
+                guard photoAspect > 0 else { continue }
+                cost += FramingCostWeight.aspect * abs(log(photoAspect) - log(cellAspect))
+            }
+        }
+        magicLayoutEvaluationCount += 1
+        if cost < bestPermCost {
+            bestPermCost = cost
+            bestPermutation = perm
+        }
+    }
+
+    return (bestPermutation, bestPermCost)
+}
+
+// MARK: - 4. Phase 2: divider-fraction search
+
+/// The coarse grid Phase 2 searches each hot divider over - `Magic Layout
+/// Spec.md`'s own "roughly 0.3...0.7 in about 5 steps". `t` is the
+/// divider's position WITHIN the pair of fractions it separates (see
+/// `applyingDividerFraction`'s comment) - for a plain 2-child split this IS
+/// the new fraction directly, which is what makes 0.3...0.7 read the same
+/// way here as it does in the spec's own framing.
+private let dividerSearchGrid: [Double] = [0.3, 0.4, 0.5, 0.6, 0.7]
+
+/// One divider inside a template's tree, located the same way
+/// `Layout.swift`'s `DividerFrame` locates one (`path` to the owning
+/// `.split` node, `index` of the divider within it - divider `index`
+/// separates that node's child `index` from child `index + 1`), plus the
+/// two SLOT-INDEX ranges (into `originalOrder`, i.e. `photoIDs(in:)`'s own
+/// flattened traversal order) that sit on either side of it. A "slot" is a
+/// leaf POSITION in that traversal, not a photo identity - stable for a
+/// given template regardless of which permutation ends up assigned there.
+private struct DividerSearchSite {
+    let path: [Int]
+    let index: Int
+    let leftRange: Range<Int>
+    let rightRange: Range<Int>
+}
+
+/// Depth-first, parent-before-children walk collecting every `.split`
+/// node's dividers as `DividerSearchSite`s. Fixed and fully deterministic
+/// for a given tree SHAPE - it depends only on the template's topology
+/// (never on which photo occupies which leaf), so the same template always
+/// yields sites in the same order. Mirrors `Layout.swift`'s own
+/// divider-collection order (a node's own dividers before its children's).
+private func dividerSearchSites(in node: Node) -> [DividerSearchSite] {
+    func walk(_ node: Node, path: [Int], slotOffset: Int) -> (slotCount: Int, sites: [DividerSearchSite]) {
+        switch node {
+        case .leaf:
+            return (1, [])
+        case .split(_, _, let children):
+            var childCounts: [Int] = []
+            var childSites: [DividerSearchSite] = []
+            var cursor = slotOffset
+            for (i, child) in children.enumerated() {
+                let (count, sites) = walk(child, path: path + [i], slotOffset: cursor)
+                childCounts.append(count)
+                childSites.append(contentsOf: sites)
+                cursor += count
+            }
+
+            var starts: [Int] = []
+            var runningStart = slotOffset
+            for count in childCounts {
+                starts.append(runningStart)
+                runningStart += count
+            }
+
+            var ownSites: [DividerSearchSite] = []
+            for i in 0..<(children.count - 1) {
+                let leftRange = starts[i]..<(starts[i] + childCounts[i])
+                let rightRange = starts[i + 1]..<(starts[i + 1] + childCounts[i + 1])
+                ownSites.append(DividerSearchSite(path: path, index: i, leftRange: leftRange, rightRange: rightRange))
+            }
+            return (cursor - slotOffset, ownSites + childSites)
+        }
+    }
+    return walk(node, path: [], slotOffset: 0).sites
+}
+
+/// Returns `node` with divider (`path`, `index`) moved to `t`: the two
+/// fractions that divider separates (`fractions[index]` and
+/// `fractions[index + 1]`) are redistributed so their OWN sum is preserved
+/// (a zero-sum move against just that pair, same as a real divider drag -
+/// see the invariant comment on `Node` in `Model.swift`) with `t` as the new
+/// split point WITHIN that pair - `fractions[index] = t * pairSum`. Every
+/// other fraction in the tree, including every other divider's own pair
+/// sum, is untouched. Clamps to `Layout.minCellFraction` on either side of
+/// the pair if the coarse grid would otherwise push a fraction below it
+/// (requirement: a searched fraction must never violate Layout's own
+/// minimum-cell rule) - the clamp itself preserves the pair's sum, so the
+/// whole array still sums to 1.0 afterward.
+private func applyingDividerFraction(_ node: Node, path: [Int], index: Int, t: Double) -> Node {
+    guard let head = path.first else {
+        guard case .split(let axis, var fractions, let children) = node,
+              fractions.indices.contains(index), fractions.indices.contains(index + 1) else { return node }
+        let pairSum = fractions[index] + fractions[index + 1]
+        var left = t * pairSum
+        var right = pairSum - left
+        if left < Layout.minCellFraction {
+            left = Layout.minCellFraction
+            right = pairSum - left
+        }
+        if right < Layout.minCellFraction {
+            right = Layout.minCellFraction
+            left = pairSum - right
+        }
+        fractions[index] = left
+        fractions[index + 1] = right
+        return .split(axis: axis, fractions: fractions, children: children)
+    }
+    guard case .split(let axis, let fractions, let children) = node, children.indices.contains(head) else { return node }
+    var newChildren = children
+    newChildren[head] = applyingDividerFraction(children[head], path: Array(path.dropFirst()), index: index, t: t)
+    return .split(axis: axis, fractions: fractions, children: newChildren)
+}
+
+/// Phase 2's divider-fraction search for ONE template candidate, nested
+/// inside `faceAwareAssignment`'s per-template loop exactly where that
+/// function's doc comment says it would be. Lets a cell GROW to fit a
+/// group shot instead of only ever cropping it, by trying coarser positions
+/// for the template's own dividers (`dividerSearchGrid`, ~0.3...0.7 in 5
+/// steps, per `Magic Layout Spec.md`'s Phase 2) and re-solving before each
+/// one is scored - never touching `framingCost` or `mustKeepRegion`
+/// themselves, only widening the search space they get evaluated over.
+///
+/// PRUNING (bounding the cost): a divider whose cells hold no must-keep
+/// region can only ever move the APPEARANCE of aspect-fallback photos,
+/// which Phase 2 isn't chartered to chase - so this only searches "hot"
+/// dividers, those with a must-keep photo on at least one side, determined
+/// ONCE from `authoredPermutation` (the winning assignment at the
+/// template's own authored fractions, already computed by the caller).
+/// That keeps the grid tiny even for the biggest candidates (8 templates x
+/// up to 3 dividers each, for 4 photos) - see the Phase 2 build-log entry
+/// for measured evaluation counts and wall-clock.
+///
+/// SEARCH SHAPE: single-pass coordinate descent over the hot dividers, in
+/// `dividerSearchSites`' fixed traversal order - not a full combinatorial
+/// cross of every hot divider's 5 positions. A full cross is what actually
+/// blows the budget: several of this app's OWN templates place 2 or 3
+/// dividers on ONE split node (`threeColumns`, `fourColumns`, `fourRows`,
+/// and the inner 3-way split inside every `bigX...` / `sandwich` template),
+/// so a same-node combinatorial cross is `5^(dividers in that node)` before
+/// even multiplying across templates. Coordinate descent instead fixes
+/// every OTHER hot divider at its current-best value while sweeping one,
+/// keeps the value if a candidate strictly beats the running cost (ties
+/// therefore keep the earlier, wider-canvas-fraction candidate - the same
+/// strict-`<` rule `faceAwareAssignment` itself uses), and moves on -
+/// O(hot dividers x 5) fraction-candidates per template rather than
+/// O(5 ^ hot dividers). At each candidate this reruns
+/// `bestPermutationAndCost` (a fresh full permutation search, not the
+/// fixed `authoredPermutation`), so the assignment is free to follow the
+/// fractions if a different one now fits better - this is what keeps the
+/// result a true (template, fractions, assignment) triple rather than
+/// fractions searched against a permutation that's gone stale.
+///
+/// Never worse than the authored fractions: `currentCost` starts at
+/// `authoredCost` and only updates on a strict improvement, so a template
+/// with no hot dividers (or none that help) returns `(template,
+/// authoredPermutation, authoredCost)` unchanged.
+private func searchDividerFractions(
+    template: Node,
+    originalOrder: [PhotoID],
+    authoredPermutation: [PhotoID],
+    authoredCost: Double,
+    photoSizes: [PhotoID: CGSize],
+    mustKeepRegions: [PhotoID: CGRect],
+    canvasSize: CGSize,
+    border: BorderStyle
+) -> (template: Node, permutation: [PhotoID], cost: Double) {
+    let sites = dividerSearchSites(in: template)
+    guard !sites.isEmpty else { return (template, authoredPermutation, authoredCost) }
+
+    func isHot(_ site: DividerSearchSite) -> Bool {
+        let leftHot = site.leftRange.contains { slot in mustKeepRegions[authoredPermutation[slot]] != nil }
+        let rightHot = site.rightRange.contains { slot in mustKeepRegions[authoredPermutation[slot]] != nil }
+        return leftHot || rightHot
+    }
+    let hotSites = sites.filter(isHot)
+    guard !hotSites.isEmpty else { return (template, authoredPermutation, authoredCost) }
+
+    var currentTemplate = template
+    var currentPermutation = authoredPermutation
+    var currentCost = authoredCost
+
+    for site in hotSites {
+        var bestTemplateForSite = currentTemplate
+        var bestPermutationForSite = currentPermutation
+        var bestCostForSite = currentCost
+
+        for t in dividerSearchGrid {
+            let candidate = applyingDividerFraction(currentTemplate, path: site.path, index: site.index, t: t)
+            let (perm, cost) = bestPermutationAndCost(
+                for: candidate,
+                originalOrder: originalOrder,
+                photoSizes: photoSizes,
+                mustKeepRegions: mustKeepRegions,
+                canvasSize: canvasSize,
+                border: border
+            )
+            if cost < bestCostForSite {
+                bestCostForSite = cost
+                bestTemplateForSite = candidate
+                bestPermutationForSite = perm
+            }
+        }
+
+        currentTemplate = bestTemplateForSite
+        currentPermutation = bestPermutationForSite
+        currentCost = bestCostForSite
+    }
+
+    return (currentTemplate, currentPermutation, currentCost)
 }

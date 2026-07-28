@@ -992,6 +992,200 @@ do {
 }
 
 // =====================================================================
+// Phase 2 - divider-fraction search: lets a template's own split fractions
+// move coarsely (~0.3...0.7, per `Magic Layout Spec.md`'s Phase 2) so a
+// cell can GROW to rescue a group shot Phase 1 could only crop. Covers: a
+// clip Phase 1 alone cannot escape that Phase 2 rescues by resizing, the
+// resulting fractions genuinely differing from the authored ones,
+// determinism, bounds (every searched fraction stays >= minCellFraction
+// and each split's fractions still sum to 1.0), the (unchanged) faceless
+// degrade, and a bigger mixed-mustKeep case.
+// =====================================================================
+
+/// Reproduces `MagicLayout.swift`'s own (private, same-cost) per-template
+/// permutation search using only PUBLIC engine pieces (`solve`,
+/// `photoIDs(in:)`, `permutations`, `framingCost`, `aspect`,
+/// `FramingCostWeight.aspect`) - same technique the existing degrade tests
+/// already use to reconstruct "what today's flow produces" for comparison.
+/// Gives the cost `template`'s AUTHORED fractions alone would have scored,
+/// i.e. the Phase-1-only answer, to compare against Phase 2's result.
+func referenceAuthoredCost(
+    template: Node,
+    photoSizes: [PhotoID: CGSize],
+    mustKeepRegions: [PhotoID: CGRect],
+    canvasSize: CGSize,
+    border: BorderStyle
+) -> Double {
+    let originalOrder = photoIDs(in: template)
+    let (cells, _) = solve(root: template, canvasSize: canvasSize, border: border)
+    let cellByID = Dictionary(uniqueKeysWithValues: cells.map { ($0.id, $0.rect) })
+    let slotAspects: [Double] = originalOrder.map { id in cellByID[id].map { aspect($0) } ?? 1 }
+
+    var bestCost = Double.infinity
+    for perm in permutations(originalOrder) {
+        var cost = 0.0
+        for slot in 0..<perm.count {
+            let photoID = perm[slot]
+            let cellAspect = slotAspects[slot]
+            guard cellAspect > 0 else { continue }
+            if let mustKeep = mustKeepRegions[photoID] {
+                let pixelSize = photoSizes[photoID] ?? CGSize(width: 1, height: 1)
+                cost += framingCost(mustKeep: mustKeep, photoPixelSize: pixelSize, cellAspect: cellAspect)
+            } else {
+                let photoAspect = aspect(photoSizes[photoID] ?? CGSize(width: 1, height: 1))
+                guard photoAspect > 0 else { continue }
+                cost += FramingCostWeight.aspect * abs(log(photoAspect) - log(cellAspect))
+            }
+        }
+        if cost < bestCost { bestCost = cost }
+    }
+    return bestCost
+}
+
+/// The fractions of `node` if it's a `.split`, else nil - lets a check fail
+/// gracefully (via the `else` branch below) instead of crashing the whole
+/// harness if a template ever turned out not to be a split (never expected
+/// for 2...4 photos, but this keeps the test itself honest either way).
+func splitFractions(_ node: Node) -> [Double]? {
+    if case .split(_, let fractions, _) = node { return fractions }
+    return nil
+}
+
+/// Every split node's fractions sum to 1.0 and no individual fraction is
+/// below `Layout.minCellFraction` - the same invariant every OTHER
+/// mutating operation on `Node` already has to uphold (see `Model.swift`).
+/// Phase 2 is a new source of fraction values, so it needs its own check
+/// that it never violates this.
+func allFractionsValid(_ node: Node) -> Bool {
+    switch node {
+    case .leaf:
+        return true
+    case .split(_, let fractions, let children):
+        guard near(fractions.reduce(0, +), 1.0, 1e-6) else { return false }
+        guard fractions.allSatisfy({ $0 >= Layout.minCellFraction - 1e-9 }) else { return false }
+        return children.allSatisfy(allFractionsValid)
+    }
+}
+
+do {
+    // Wide group shot (mustKeep aspect 3.0) alongside a neutral square
+    // photo. At `stacked`'s AUTHORED 0.5/0.5 split the cell aspect is 2.0,
+    // which the reference cost below confirms still clips this subject -
+    // Phase 1 alone cannot escape this without switching templates, and
+    // `sideBySide` clips far worse regardless (its columns can only reach
+    // aspect ~0.7 at best, nowhere near what this subject needs). Phase 2
+    // must find a NARROWER row for the neutral photo - growing the group's
+    // own row instead - and remove the clip.
+    let group = PhotoID()
+    let neutral = PhotoID()
+    let photos = [group, neutral]
+    let photoSizes: [PhotoID: CGSize] = [
+        group: CGSize(width: 3500, height: 1500),
+        neutral: CGSize(width: 2000, height: 2000)
+    ]
+    let mustKeepRegions: [PhotoID: CGRect] = [
+        group: CGRect(x: 0.05, y: 0.35, width: 0.9, height: 0.3)
+    ]
+    let canvasSize = CGSize(width: 1000, height: 1000)
+
+    let authoredStackedCost = referenceAuthoredCost(
+        template: templates(for: photos)[1], // stacked
+        photoSizes: photoSizes, mustKeepRegions: mustKeepRegions, canvasSize: canvasSize, border: .none
+    )
+    check(authoredStackedCost > 2.0, "Phase 2 rescue: stacked's OWN authored fractions (cell aspect 2.0) still clip the group shot")
+
+    let result = faceAwareAssignment(photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions, canvasSize: canvasSize, border: .none)
+    check(result.templateIndex == 1, "Phase 2 rescue: stacked (already the better template) still wins")
+    check(result.cost < authoredStackedCost, "Phase 2 rescue: the resized cell scores strictly better than the authored split")
+    check(result.cost < 1.0, "Phase 2 rescue: the resized cell is no longer clipping (cost has dropped out of clip range)")
+
+    if let fractions = splitFractions(result.template) {
+        check(!near(fractions[0], 0.5, 0.01), "Phase 2 rescue: chosen fractions genuinely differ from the authored 0.5/0.5 split")
+        check(fractions.allSatisfy { $0 >= Layout.minCellFraction - 1e-9 }, "Phase 2 rescue: searched fractions respect Layout.minCellFraction")
+        check(near(fractions.reduce(0, +), 1.0), "Phase 2 rescue: searched fractions still sum to 1.0")
+    } else {
+        check(false, "Phase 2 rescue: winning template is a split node")
+    }
+
+    // Determinism: same inputs, called again, identical (template index,
+    // resulting tree - fractions AND assignment - and cost).
+    let result2 = faceAwareAssignment(photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions, canvasSize: canvasSize, border: .none)
+    check(result.templateIndex == result2.templateIndex, "Phase 2: determinism - templateIndex repeats")
+    check(result.template == result2.template, "Phase 2: determinism - resulting tree (fractions + assignment) repeats")
+    check(near(result.cost, result2.cost, 1e-12), "Phase 2: determinism - cost repeats")
+}
+
+do {
+    // Explicit Phase 2 regression on the degrade guarantee: the guard in
+    // `faceAwareAssignment` returns BEFORE Phase 2's divider search ever
+    // runs, so a faceless set must not even increment the evaluation
+    // counter, let alone produce a different template or assignment. This
+    // is the same guard Phase 1's build log notes was broken once before
+    // and caught late - this check pins it against Phase 2 specifically.
+    let p1 = PhotoID()
+    let p2 = PhotoID()
+    let photos = [p1, p2]
+    let photoSizes: [PhotoID: CGSize] = [
+        p1: CGSize(width: 1920, height: 1080),
+        p2: CGSize(width: 1920, height: 1080)
+    ]
+    let canvasSize = CGSize(width: 1000, height: 1000)
+
+    let evaluationsBefore = magicLayoutEvaluationCount
+    let result = faceAwareAssignment(photos: photos, photoSizes: photoSizes, mustKeepRegions: [:], canvasSize: canvasSize, border: .none)
+    check(magicLayoutEvaluationCount == evaluationsBefore, "Phase 2 regression: faceless degrade never enters the divider search (0 new evaluations)")
+
+    let expectedTemplateIndex = defaultTemplateIndex(orientations: photos.map { photoSizes[$0]! })
+    let expectedTemplate = contentFitAssignment(
+        photoSizes: photoSizes,
+        template: templates(for: photos)[expectedTemplateIndex],
+        canvasSize: canvasSize,
+        border: .none
+    )
+    check(result.templateIndex == expectedTemplateIndex, "Phase 2 regression: faceless degrade picks the SAME template as today")
+    check(result.template == expectedTemplate, "Phase 2 regression: faceless degrade result stays byte-identical (fractions included)")
+}
+
+do {
+    // A bigger, messier case: 4 photos, every one carrying its own
+    // must-keep region (the worst case for the search - every template's
+    // dividers are "hot"). Exercises bounds and general validity rather
+    // than a specific expected template, since with four competing wide
+    // and tall subjects there's no single obviously-correct answer - what
+    // must hold is that the search still terminates with a valid, fully
+    // assigned, in-range result.
+    let a = PhotoID()
+    let b = PhotoID()
+    let c = PhotoID()
+    let d = PhotoID()
+    let photos = [a, b, c, d]
+    let photoSizes: [PhotoID: CGSize] = [
+        a: CGSize(width: 3500, height: 1500),
+        b: CGSize(width: 1500, height: 3500),
+        c: CGSize(width: 2000, height: 2000),
+        d: CGSize(width: 2800, height: 2100)
+    ]
+    let mustKeepRegions: [PhotoID: CGRect] = [
+        a: CGRect(x: 0.05, y: 0.35, width: 0.9, height: 0.3),
+        b: CGRect(x: 0.3, y: 0.1, width: 0.4, height: 0.8),
+        c: CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5),
+        d: CGRect(x: 0.1, y: 0.2, width: 0.6, height: 0.4)
+    ]
+    let canvasSize = CGSize(width: 1000, height: 1000)
+
+    let result = faceAwareAssignment(photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions, canvasSize: canvasSize, border: .none)
+    check(templates(for: photos).indices.contains(result.templateIndex), "Phase 2 (4-photo, all mustKeep): templateIndex is a valid candidate index")
+    check(Set(leafList(result.template)) == Set(photos), "Phase 2 (4-photo, all mustKeep): every photo still placed exactly once")
+    check(result.cost.isFinite, "Phase 2 (4-photo, all mustKeep): cost is finite")
+    check(allFractionsValid(result.template), "Phase 2 (4-photo, all mustKeep): every searched fraction is in-range and every split still sums to 1.0")
+
+    // Determinism holds for the bigger case too.
+    let result2 = faceAwareAssignment(photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions, canvasSize: canvasSize, border: .none)
+    check(result.template == result2.template, "Phase 2 (4-photo, all mustKeep): determinism - resulting tree repeats")
+    check(near(result.cost, result2.cost, 1e-12), "Phase 2 (4-photo, all mustKeep): determinism - cost repeats")
+}
+
+// =====================================================================
 // Summary
 // =====================================================================
 print("\(passed) passed, \(failed) failed")
