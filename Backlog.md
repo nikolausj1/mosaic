@@ -133,6 +133,10 @@ These could be settled by dumping strings/resources from an Android APK, **which
 v1 has nothing to configure by design (dark always, no resolution picker, zero-config auto-framing). Candidates that would eventually justify one: watermark toggle (v2 StoreKit), restore purchases (v2), haptics toggle, about/licenses. When one materializes, the ingress is a gear icon in the PICKER header (Screen A) - the editor's chrome budget is spent.
 **Revisit signal:** the first real setting arrives (likely v2's purchase restore).
 
+### B29 - Do users need "Continue current collage" / "Edit last collage"? (removed 2026-07-27, watching)
+Both picker entry rows were built and then **removed at Justin's direction** ("Its easy to recreate, not a big deal. If I hear different from our users I will add it back."). The PERSISTENCE behind them is untouched and still runs: current.json is autosaved, a cold launch with current.json still restores straight into the editor, and the save sheet's Done still archives current -> last. Only the two in-picker entry points are gone, so a warm relaunch is the only way back into an in-progress collage now.
+**Revisit signal:** a tester (or Justin) backs out of the editor, can't get the collage back, and is annoyed - or App Store reviews ask for it. Restoring is a small job: re-add the two banner rows plus the `hasCurrentCollage`/`onContinueCurrent`/`hasLastCollage`/`onEditLastCollage` plumbing (see git history around 2026-07-27), since DocumentStore still exposes everything they need.
+
 ### B24 - "Original" ratio chip semantics (Phase 4 judgment call)
 **Shipped:** Original := the FIRST photo's native pixel aspect (document leaf order). The PRD lists the chip without defining it for a multi-photo canvas.
 **Revisit signal:** Justin taps Original expecting something else (e.g. the arrival ratio, or the currently selected photo's aspect).

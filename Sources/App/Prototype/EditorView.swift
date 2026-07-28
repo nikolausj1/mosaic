@@ -49,15 +49,23 @@ struct EditorView: View {
     /// fades in at demo start, fades out at demo end/skip.
     @State private var ghostDemoVisible = false
     /// Which live anchor (see CanvasView's CoachMarkAnchorsKey export) the
-    /// ghost fingertip currently tracks: false = the canvas composition
-    /// bracket (phase 1), true = the divider capsule (phase 2). (Justin,
-    /// 2026-07-27: phase 1 used to track the interior corner handle - see
-    /// `runGhostGestureDemo`'s doc comment for why that changed.)
-    @State private var ghostDemoAtDivider = false
+    /// ghost fingertip currently tracks. (Justin, 2026-07-27): a `.center`
+    /// opening beat was added ahead of the bracket/divider phases that
+    /// already existed - "having it start at the center gives the user a
+    /// second to figure out whats going on" - and phase 1's bracket target
+    /// moved from the bottom-right corner to the top-right one ("the upper
+    /// right is more visible"); phase 1 used to track the interior corner
+    /// handle before that - see `runGhostGestureDemo`'s doc comment for why
+    /// that changed.
+    private enum GhostDemoPhase { case center, bracket, divider }
+    @State private var ghostDemoPhase: GhostDemoPhase = .center
     /// The brief scale-down "press" pulse at the start of each drag leg.
     @State private var ghostDemoPressed = false
     /// The pre-demo document, captured once at demo start so any exit path
     /// (natural finish, skip tap, or an early guard) can restore it exactly.
+    /// Half the ghost fingertip's outer glow ring (54pt, see CoachMarks.swift)
+    /// - the clamp margin that keeps it fully on screen at a bracket anchor.
+    private let ghostFingertipRadius: CGFloat = 27
     @State private var ghostDemoSnapshot: Document?
     @State private var ghostDemoTask: Task<Void, Never>?
 
@@ -73,6 +81,7 @@ struct EditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             topBar
+                .overlay(ghostDemoScrim)
             ZStack {
                 // Dead-space deselect (bug fix, Justin 2026-07-17): the
                 // canvas's own gesture surface only extends 40pt beyond the
@@ -131,6 +140,7 @@ struct EditorView: View {
             }
             .animation(.easeInOut(duration: 0.2), value: state.selection != nil)
             EditorBottomBar(state: state, onReplace: { _ in })
+                .overlay(ghostDemoScrim)
         }
         .background(Color.mosaicBackground.ignoresSafeArea())
         #if DEBUG
@@ -159,12 +169,30 @@ struct EditorView: View {
             // true full screen, header and bottom bar included.
             GeometryReader { proxy in
                 if ghostDemoVisible {
-                    let targetAnchor = ghostDemoAtDivider ? anchors.divider : anchors.bracket
+                    let targetAnchor: Anchor<CGRect>? = {
+                        switch ghostDemoPhase {
+                        case .center: return anchors.center
+                        case .bracket: return anchors.bracket
+                        case .divider: return anchors.divider
+                        }
+                    }()
                     GhostGestureOverlay(
                         screenSize: proxy.size,
                         fingertipCenter: targetAnchor.map { anchor in
                             let rect = proxy[anchor]
-                            return CGPoint(x: rect.midX, y: rect.midY)
+                            // Clamped inside the screen (Justin, 2026-07-28):
+                            // the canvas runs nearly edge to edge, so a
+                            // bracket anchor - which sits 12pt OUTSIDE the
+                            // canvas corner - puts the fingertip half off
+                            // the display, which defeated the whole point of
+                            // moving the demo to the more visible corner. A
+                            // real finger would cover the bracket from just
+                            // inside anyway.
+                            let inset = ghostFingertipRadius + 6
+                            return CGPoint(
+                                x: min(max(rect.midX, inset), proxy.size.width - inset),
+                                y: min(max(rect.midY, inset), proxy.size.height - inset)
+                            )
                         },
                         isPressed: ghostDemoPressed,
                         captionText: "Watch: drag a corner to reshape, a seam to resize",
@@ -431,6 +459,22 @@ struct EditorView: View {
         }
     }
 
+    /// Focus scrim (Justin, 2026-07-27): while the demo plays, a dark scrim
+    /// dims the header and bottom bar (each applies this as its own
+    /// `.overlay` in `body`) so attention lands on the canvas, which stays
+    /// unscrimmed - the whole point is watching the collage reshape. Purely
+    /// a function of `ghostDemoVisible`, so it fades in/out for free under
+    /// whatever `withAnimation` call is already flipping that flag (demo
+    /// start, natural finish, or skip) - no separate animation wiring
+    /// needed. `allowsHitTesting(false)` so it never competes with
+    /// `GhostGestureOverlay`'s own full-screen tap-anywhere-skip catcher
+    /// (published above via `.overlayPreferenceValue`, which layers on top
+    /// of this entire VStack regardless of where this scrim sits in it).
+    private var ghostDemoScrim: some View {
+        Color.black.opacity(ghostDemoVisible ? 0.6 : 0)
+            .allowsHitTesting(false)
+    }
+
     /// Tap-anywhere-skip (GhostGestureOverlay's `onSkip`): cancels the
     /// in-flight demo task, restores the pre-demo document immediately, and
     /// marks the demo seen - exactly as final as letting it play out.
@@ -445,17 +489,24 @@ struct EditorView: View {
         ghostDemoSnapshot = nil
     }
 
-    /// The whole demo: snapshot -> (bracket press/drag-out/hold/drag-back) ->
-    /// travel -> (divider press/drag-out/hold/drag-back) -> restore -> fade
-    /// out. Bypasses `GestureController` and `EditorState.beginGesture`/
-    /// `commitGesture` entirely - it mutates `state.document` (and, for the
-    /// bracket phase, `state.liveCanvasSize`) directly, the same way a real
-    /// gesture's PREVIEW does mid-drag (see GestureController's per-tick
+    /// The whole demo: snapshot -> center hold -> glide to the bracket ->
+    /// (bracket press/drag-out/hold/drag-back) -> travel -> (divider
+    /// press/drag-out/hold/drag-back) -> restore -> fade out. Bypasses
+    /// `GestureController` and `EditorState.beginGesture`/`commitGesture`
+    /// entirely - it mutates `state.document` (and, for the bracket phase,
+    /// `state.liveCanvasSize`) directly, the same way a real gesture's
+    /// PREVIEW does mid-drag (see GestureController's per-tick
     /// `state.document = doc` calls) - so there is NO undo-stack entry at
     /// any point, matching "gestures preview without pushing undo, only
     /// commit at gesture end" (this demo never calls the "commit" half at
     /// all, since it always ends by restoring the exact starting document
     /// rather than keeping a change).
+    ///
+    /// Opening beat (Justin, 2026-07-27): the fingertip now fades in at the
+    /// canvas's dead center and holds there briefly BEFORE anything moves -
+    /// "having it start at the center gives the user a second to figure out
+    /// whats going on" - then glides to the bracket phase below. Previously
+    /// the fingertip faded in already sitting on the bracket.
     ///
     /// Phase 1 change (Justin, 2026-07-27): this used to demo the interior
     /// CORNER handle (where two dividers cross) first. On-device, Justin
@@ -472,8 +523,11 @@ struct EditorView: View {
     /// `handleBracket` uses (see GestureController.swift's "Ratio detents
     /// (bracket drag)" / "Bracket-drag math" sections) - same
     /// shared-free-function pattern already established for the divider
-    /// phase below. Phase 2 (divider drag) is unchanged - Justin explicitly
-    /// approved it ("a line divider (yes this is good)").
+    /// phase below. The TARGET CORNER moved from bottom-right to top-right
+    /// the same day ("the upper right is more visible") - see `bracketDY`'s
+    /// doc comment just below for the sign flip that move required. Phase 2
+    /// (divider drag) is unchanged - Justin explicitly approved it ("a line
+    /// divider (yes this is good)").
     ///
     /// Autosave note: `document`'s `didSet` schedules an autosave on EVERY
     /// assignment regardless of undo - that's pre-existing, unconditional
@@ -514,27 +568,52 @@ struct EditorView: View {
         // Bracket travel: deliberately ASYMMETRIC (not a plain diagonal at
         // 45 degrees) so the drag visibly changes the canvas's ASPECT RATIO
         // rather than just scaling it up uniformly - a real freehand
-        // reshape. Direction is a JUDGMENT CALL (Justin can retune): the
-        // dominant vertical component takes the canvas from its starting
-        // ratio toward a taller/portrait shape (obvious against the default
-        // square canvas), while the small horizontal component keeps the
+        // reshape. Magnitude is a JUDGMENT CALL (Justin can retune): the
+        // dominant component (`bracketDY`) takes the canvas from its
+        // starting ratio toward a taller/portrait shape (obvious against
+        // the default square canvas), while the small `bracketDX` keeps the
         // drag genuinely diagonal rather than a pure vertical pull. ~16% is
         // the dominant axis, within the brief's "~12-18% of canvas" range.
+        //
+        // Sign convention (Justin, 2026-07-27, verified against
+        // `applyBracketDelta`'s per-corner switch in GestureController.swift
+        // rather than assumed): `applyBracketDelta` computes
+        // `.bottomRight: newWidth += dx; newHeight += dy` but
+        // `.topRight: newWidth += dx; newHeight -= dy` - the height term
+        // flips sign between those two corners because a positive
+        // (rightward, downward) drag is "outward" at the bottom-right
+        // vertex but "inward" at the top-right one; genuinely outward there
+        // is rightward-and-UPWARD, i.e. negative dy. So `animateBracketDrag`
+        // is fed `dy: -bracketDY` below for the top-right leg (translation
+        // height negative) to reproduce the SAME "grow the canvas, dominant
+        // vertical, toward portrait" reshape the old bottom-right demo
+        // showed - NOT a naive reuse of the old positive dy, which against
+        // `.topRight`'s formula would instead shrink the canvas vertically
+        // (still a ratio change, just the wrong direction for what this
+        // demo means to teach). Confirmed on-device: the top-right bracket
+        // visibly glides up-and-right and the canvas measurably narrows
+        // toward portrait, then restores exactly on the drag-back leg.
         let bracketDX = shortEdge * 0.06
         let bracketDY = shortEdge * 0.16
 
-        ghostDemoAtDivider = false // always start on the bracket phase
+        ghostDemoPhase = .center // fingertip fades in here, not on the bracket
         withAnimation(.easeInOut(duration: 0.25)) { ghostDemoVisible = true }
-        try? await Task.sleep(nanoseconds: 300_000_000) // let the fade-in read before the first press
+        // Hold at center ~0.6s total (0.25s fade-in + this) so the user has
+        // a beat to register what they're looking at before anything moves.
+        try? await Task.sleep(nanoseconds: 350_000_000)
+
+        guard !Task.isCancelled else { return }
+        withAnimation(.easeInOut(duration: 0.45)) { ghostDemoPhase = .bracket } // glide: center -> the upper-right bracket
+        try? await Task.sleep(nanoseconds: 500_000_000) // let the glide read before the first press
 
         guard !Task.isCancelled else { return }
         await pressPulse()
         guard !Task.isCancelled else { return }
-        await animateBracketDrag(corner: .bottomRight, canvasSize: canvasSize, dx: bracketDX, dy: bracketDY, out: true)
+        await animateBracketDrag(corner: .topRight, canvasSize: canvasSize, dx: bracketDX, dy: -bracketDY, out: true)
         guard !Task.isCancelled else { return }
         try? await Task.sleep(nanoseconds: 350_000_000) // brief hold
         guard !Task.isCancelled else { return }
-        await animateBracketDrag(corner: .bottomRight, canvasSize: canvasSize, dx: bracketDX, dy: bracketDY, out: false)
+        await animateBracketDrag(corner: .topRight, canvasSize: canvasSize, dx: bracketDX, dy: -bracketDY, out: false)
         // Hard safety-net snap to a bit-identical original before the next
         // phase - mirrors the old corner phase's same safety net. Also
         // clears the bracket's live-size override so `state.canvasSize`
@@ -545,7 +624,7 @@ struct EditorView: View {
 
         if let divider {
             guard !Task.isCancelled else { return }
-            withAnimation(.easeInOut(duration: 0.45)) { ghostDemoAtDivider = true } // travel: bracket -> divider, document untouched so this is a plain position glide
+            withAnimation(.easeInOut(duration: 0.45)) { ghostDemoPhase = .divider } // travel: bracket -> divider, document untouched so this is a plain position glide
             try? await Task.sleep(nanoseconds: 500_000_000)
             guard !Task.isCancelled else { return }
             await pressPulse()

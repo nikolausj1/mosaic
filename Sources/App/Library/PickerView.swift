@@ -325,32 +325,10 @@ struct PickerView: View {
     /// `.replace` mode's completion (Phase 4): the single freshly-loaded
     /// asset, handed to `EditorState.replace(photoID:image:pixelSize:...)`.
     var onReplaceConfirmed: ((UIImage, CGSize, PHAsset?) -> Void)? = nil
-    /// Nothing-is-destructive navigation (Justin, 2026-07-26): whether
-    /// `current.json` exists - shows the "Continue current collage" entry
-    /// point below the header when true, ABOVE "Edit last collage". Current
-    /// and last can now coexist (backing out of the editor no longer deletes
-    /// current.json), so both rows may show at once. Left `false` (the
-    /// default) for the `.replace`-mode picker EditorView presents as a
-    /// sheet, same reasoning as `hasLastCollage` below.
-    var hasCurrentCollage: Bool = false
-    /// Tapping "Continue current collage" - the caller (ContentView) restores
-    /// current.json straight into the editor (no promotion needed; it's
-    /// already current).
-    var onContinueCurrent: (() -> Void)? = nil
-    /// Phase 6 persistence: whether `last.json` exists - shows the "Edit
-    /// last collage" entry point below the header when true. Left `false`
-    /// (the default) for the `.replace`-mode picker EditorView presents as a
-    /// sheet, which never wants this.
-    var hasLastCollage: Bool = false
-    /// Tapping "Edit last collage" - the caller (ContentView) promotes
-    /// last.json to current.json and restores it into the editor.
-    var onEditLastCollage: (() -> Void)? = nil
 
     @State private var showAlbumMenu = false
     @State private var showFallbackPicker = false
     @State private var showSettings = false
-    /// Dev Tools entry (Justin, 2026-07-26) - see `DevSheet.swift`.
-    @State private var showDevSheet = false
 
     /// First-run welcome (Justin, 2026-07-26, full-screen revision): shown
     /// exactly once per install, gated by this flag - see `LaunchPhase` and
@@ -440,20 +418,12 @@ struct PickerView: View {
         state: PickerState,
         storeService: StoreService,
         onConfirmed: @escaping (Document, [PhotoID: UIImage]) -> Void = { _, _ in },
-        onReplaceConfirmed: ((UIImage, CGSize, PHAsset?) -> Void)? = nil,
-        hasCurrentCollage: Bool = false,
-        onContinueCurrent: (() -> Void)? = nil,
-        hasLastCollage: Bool = false,
-        onEditLastCollage: (() -> Void)? = nil
+        onReplaceConfirmed: ((UIImage, CGSize, PHAsset?) -> Void)? = nil
     ) {
         _state = State(initialValue: state)
         self.storeService = storeService
         self.onConfirmed = onConfirmed
         self.onReplaceConfirmed = onReplaceConfirmed
-        self.hasCurrentCollage = hasCurrentCollage
-        self.onContinueCurrent = onContinueCurrent
-        self.hasLastCollage = hasLastCollage
-        self.onEditLastCollage = onEditLastCollage
 
         // Read the "have we ever played this" flag BEFORE marking it -
         // that decides whether THIS appearance animates at all. Mark it
@@ -517,23 +487,6 @@ struct PickerView: View {
                 // opacity pair is just (0, 1) - a no-op.
                 Group {
                     header
-                    // Shown regardless of photo-library authorization state
-                    // (unlike the grid/denied/loading `content` below):
-                    // resuming a previously-saved document never needs a
-                    // NEW pick, so this shouldn't be gated behind
-                    // permission resolution - a user who hasn't granted (or
-                    // has denied) photo access can still get back into
-                    // their last collage.
-                    // Both rows may show at once now that backing out of the
-                    // editor no longer discards current.json (Justin,
-                    // 2026-07-26) - "Continue current" sits above "Edit last"
-                    // since it's the more recent, more likely-wanted thread.
-                    if hasCurrentCollage, state.mode == .pick {
-                        continueCurrentCollageBanner
-                    }
-                    if hasLastCollage, state.mode == .pick {
-                        editLastCollageBanner
-                    }
                     content
                 }
                 .offset(y: launchPhase == .arrived ? 0 : 80)
@@ -567,15 +520,18 @@ struct PickerView: View {
             }
         }
         .sheet(isPresented: $showSettings) {
-            SettingsSheet(storeService: storeService, onDismiss: { showSettings = false })
-        }
-        .sheet(isPresented: $showDevSheet) {
-            // Dev Tools (Justin, 2026-07-26) - ships in Release FOR NOW, see
-            // `DevSheet.swift`'s header comment.
-            DevSheet(
+            // Dev Tools' "Replay first-run experience" / "Clear collages" rows
+            // moved in here (Justin, 2026-07-27 - see `DevSheet.swift`'s
+            // former header comment, now this one's): the gear that used to
+            // just open purchase settings is now also the Dev Tools entry
+            // point, so the callback plumbing that used to feed `DevSheet`
+            // feeds `SettingsSheet` instead. Ships in Release FOR NOW - the
+            // lead owns gating these behind `#if DEBUG` before submission.
+            SettingsSheet(
+                storeService: storeService,
                 onReplayFirstRun: replayFirstRunExperience,
                 onClearCollages: { DocumentStore.resetAll() },
-                onDismiss: { showDevSheet = false }
+                onDismiss: { showSettings = false }
             )
         }
     }
@@ -660,23 +616,24 @@ struct PickerView: View {
         }
     }
 
-    /// Dev Tools "Replay first-run experience" (Justin, 2026-07-26): clears
-    /// `hasSeenWelcome` plus the other two onboarding flags EditorView owns
-    /// (`hasSeenCoachMarks`, `hasSeenEditor` - reset here as plain
-    /// UserDefaults keys since this file doesn't own EditorView.swift), then
-    /// re-arms this process's launch-animation guard and rewinds
-    /// `launchPhase` back to the welcome screen's start so the choreography
-    /// re-runs immediately - no relaunch needed to see it. Coach marks and
-    /// the editor's auto-selected first cell still need a fresh Editor
-    /// entry to actually replay (their flags are read fresh there), which
-    /// `DevSheet`'s footer copy is honest about.
+    /// Dev Tools "Replay first-run experience" (Justin, 2026-07-26; moved into
+    /// `SettingsSheet` 2026-07-27 - see the `.sheet(isPresented: $showSettings)`
+    /// modifier above): clears `hasSeenWelcome` plus the other two onboarding
+    /// flags EditorView owns (`hasSeenCoachMarks`, `hasSeenEditor` - reset
+    /// here as plain UserDefaults keys since this file doesn't own
+    /// EditorView.swift), then re-arms this process's launch-animation guard
+    /// and rewinds `launchPhase` back to the welcome screen's start so the
+    /// choreography re-runs immediately - no relaunch needed to see it. Coach
+    /// marks and the editor's auto-selected first cell still need a fresh
+    /// Editor entry to actually replay (their flags are read fresh there),
+    /// which `SettingsSheet`'s footer copy is honest about.
     private func replayFirstRunExperience() {
         hasSeenWelcome = false
         UserDefaults.standard.removeObject(forKey: "hasSeenCoachMarks")
         UserDefaults.standard.removeObject(forKey: "hasSeenEditor")
         state.resetLaunchAnimationFlag()
         launchPhase = UIAccessibility.isReduceMotionEnabled ? .welcomeReady : .initial
-        showDevSheet = false
+        showSettings = false
         Task { await runLaunchChoreographyIfNeeded() }
     }
 
@@ -749,32 +706,26 @@ struct PickerView: View {
         }
     }
 
-    /// Reserved brand space at the top of the picker: the wordmark and a
-    /// single instruction line. Deliberately quiet - copy, not a tutorial
-    /// (the PRD's no-tutorials rule stands; the gesture grammar still
-    /// teaches itself in the editor).
+    /// Reserved brand space at the top of the picker: just the wordmark now
+    /// (Justin, 2026-07-27 - the "Choose 2-4 photos below" instruction line
+    /// that used to sit under it is gone; the floating CTA's own label
+    /// ("Choose 2-4 photos" / "Choose 1 more" / "Next (N)", see `ctaLabel`)
+    /// already carries that message, so the masthead had nothing left to say
+    /// twice). Deliberately quiet otherwise - a brand moment, not a tutorial
+    /// (the PRD's no-tutorials rule stands; the gesture grammar still teaches
+    /// itself in the editor).
     ///
-    /// Collapsing hero header (Justin, 2026-07-26): at rest this is a real
-    /// branding moment - the lockup at `mastheadHeroLockupHeight` with
-    /// generous vertical padding - that smoothly shrinks to a compact bar
-    /// (`mastheadCompactLockupHeight`, today's original size) as the grid
-    /// scrolls, driven continuously by `heroCollapseProgress` off the
-    /// ScrollView's live offset (see `grid`'s `onScrollGeometryChange`), the
-    /// same way a native large-title nav bar collapses - not a discrete
-    /// toggle, so it tracks the finger 1:1 and un-collapses just as smoothly
-    /// scrolling back to the top. The instruction line fades and shrinks
-    /// away as it collapses, reappearing at rest.
-    ///
-    /// The Dev Tools icon now lives in this hero area's top-right corner
-    /// (Justin, 2026-07-26) rather than the album header row - anchored via
-    /// `.overlay` to the OUTER frame (whose top edge never moves as the
-    /// inner content shrinks), so it stays put in the same corner through
-    /// the whole collapse.
+    /// The settings gear now lives in this hero area's top-right corner
+    /// (Justin, 2026-07-27 - see `settingsButton`, replacing the old Dev
+    /// Tools ellipsis that used to sit here; the header row below lost its
+    /// own gear in the swap, see `header`), anchored via `.overlay` to the
+    /// OUTER frame.
     ///
     /// While `launchPhase != .arrived` the real lockup isn't here yet -
-    /// `welcomeStage` owns it - so a clear spacer holds the hero's height
-    /// and the instruction line stays invisible; both settle in together
-    /// when the phase reaches `.arrived`.
+    /// `welcomeStage` owns it - so a clear spacer holds the hero's height;
+    /// the real lockup fades in and takes over via `matchedGeometryEffect`
+    /// once the phase reaches `.arrived`.
+    ///
     /// FIXED height, deliberately (Justin, 2026-07-27 - the tap-drift bug).
     /// This masthead sits in a VStack ABOVE the grid's ScrollView, so any
     /// change to its height moves the ScrollView's frame and slides every
@@ -786,8 +737,12 @@ struct PickerView: View {
     /// report, and it was intermittent precisely because it only bit inside
     /// the collapse window. Nothing here may depend on scroll position
     /// again unless the hero moves INSIDE the ScrollView as scroll content.
+    /// Padding tightened top/bottom (28/20 -> 26/26, Justin, 2026-07-27) now
+    /// that the subtitle is gone - the lockup alone read bottom-heavy at the
+    /// old asymmetric padding, so this centers it a bit more while still
+    /// giving it real room to breathe as a confident brand moment.
     private var masthead: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 0) {
             if launchPhase == .arrived {
                 lockupImage
                     .frame(height: mastheadHeroLockupHeight)
@@ -795,18 +750,14 @@ struct PickerView: View {
             } else {
                 Color.clear.frame(height: mastheadHeroLockupHeight)
             }
-            Text("Choose 2-4 photos below")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Color.white.opacity(0.55))
-                .opacity(launchPhase == .arrived ? 1 : 0)
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 28)
-        .padding(.bottom, 20)
+        .padding(.top, 26)
+        .padding(.bottom, 26)
         // No `.pick`-mode guard needed here - `masthead` itself is only ever
         // shown in `.pick` mode (see `body` above).
         .overlay(alignment: .topTrailing) {
-            devToolsButton
+            settingsButton
         }
     }
 
@@ -814,29 +765,15 @@ struct PickerView: View {
 
     /// Next used to live here (trailing, "Next (N)"/"Replace"); it's now a
     /// floating CTA over the grid instead - see `floatingNextButton`
-    /// (Justin, 2026-07-26). The thumbnail-size control and the Dev Tools
-    /// icon that used to live at the trailing end have both moved off this
-    /// row (Justin, 2026-07-26 rework): sizing is now a pinch gesture on the
-    /// grid itself (see `pinchToResizeGesture`) and Dev Tools now sits in
-    /// the hero header's top-right corner (see `masthead`/`devToolsButton`)
-    /// - so this row is just the settings gear and the album menu now, the
-    /// trailing `Spacer` kept purely to hold the row left-weighted.
+    /// (Justin, 2026-07-26). The thumbnail-size control that used to live at
+    /// the trailing end moved off this row too (sizing is now a pinch
+    /// gesture on the grid itself, see `pinchToResizeGesture`), and now the
+    /// settings gear has moved off it as well (Justin, 2026-07-27 - it lives
+    /// in the hero header's top-right corner now, see `masthead`/
+    /// `settingsButton`) - so this row is just the album menu, the trailing
+    /// `Spacer` kept purely to hold it left-weighted.
     private var header: some View {
         HStack(spacing: 4) {
-            // B28: the reserved settings ingress - only in `.pick` mode; the
-            // `.replace`-mode picker EditorView presents as a sheet has no
-            // chrome budget for it and nothing to settle mid-replace.
-            if state.mode == .pick {
-                Button {
-                    showSettings = true
-                } label: {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.55))
-                        .frame(width: 36, height: 36)
-                }
-            }
-
             Menu {
                 ForEach(state.albums) { album in
                     Button {
@@ -862,16 +799,20 @@ struct PickerView: View {
         .background(Color.white.opacity(0.06))
     }
 
-    /// Dev Tools entry (Justin, 2026-07-26): moved from a hammer icon on the
-    /// header row to a quiet "ellipsis.circle" glyph in the hero header's
-    /// top-right corner (see `masthead`), safe-area padded. `.pick`-only,
-    /// same reasoning as the settings gear. Ships in Release FOR NOW - see
-    /// DevSheet.swift's header comment.
-    private var devToolsButton: some View {
+    /// Settings ingress (B28), now doing double duty as the Dev Tools entry
+    /// point too (Justin, 2026-07-27): moved here from the header row into
+    /// the hero's top-right corner, taking over the exact spot and quiet
+    /// styling the old Dev Tools "ellipsis.circle" glyph had (safe-area
+    /// padded, `.pick`-only - the `.replace`-mode picker EditorView presents
+    /// as a sheet has no chrome budget for it and nothing to settle
+    /// mid-replace). `SettingsSheet` itself now carries the replay/clear rows
+    /// the old (now-deleted) `DevSheet.swift` used to own - see
+    /// `SettingsSheet.swift`.
+    private var settingsButton: some View {
         Button {
-            showDevSheet = true
+            showSettings = true
         } label: {
-            Image(systemName: "ellipsis.circle")
+            Image(systemName: "gearshape")
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(.white.opacity(0.4))
                 .frame(width: 36, height: 36)
@@ -1015,51 +956,6 @@ struct PickerView: View {
         @unknown default:
             ProgressView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-    }
-
-    /// Nothing-is-destructive navigation (Justin, 2026-07-26): shown
-    /// whenever `current.json` exists - the editor's back button lands here
-    /// rather than discarding, so the in-flight collage needs a way back in.
-    /// Styled identically to `editLastCollageBanner` below (same row shape,
-    /// same accent text), distinguished only by icon and copy. Tapping it
-    /// hands straight to `onContinueCurrent` - unlike "Edit last collage"
-    /// there's no promotion step, current.json is already current.
-    private var continueCurrentCollageBanner: some View {
-        Button {
-            onContinueCurrent?()
-        } label: {
-            HStack {
-                Image(systemName: "arrow.uturn.forward")
-                Text("Continue current collage")
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-            }
-            .padding(12)
-            .foregroundStyle(Color.mosaicAccent)
-            .background(Color.white.opacity(0.06))
-        }
-    }
-
-    /// Phase 6 persistence contract: shown whenever `last.json` exists
-    /// (Launch-with-no-current.json and New-collage-discard both route here
-    /// with it available). Tapping it promotes last -> current and restores
-    /// straight into the editor - the picker never re-shows the old photos.
-    private var editLastCollageBanner: some View {
-        Button {
-            onEditLastCollage?()
-        } label: {
-            HStack {
-                Image(systemName: "arrow.uturn.backward.circle")
-                Text("Edit last collage")
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-            }
-            .padding(12)
-            .foregroundStyle(Color.mosaicAccent)
-            .background(Color.white.opacity(0.06))
         }
     }
 

@@ -21,38 +21,44 @@ extension Color {
 
 // MARK: - Coach mark geometry preference (Justin, 2026-07-26)
 
-/// Carries the two real-geometry anchors the first-entry teach needs - the
-/// divider capsule and a canvas composition bracket - up the view tree from
-/// CanvasView (which computes them; see its "Coach mark geometry export"
-/// section) to EditorView. Originally built for the single-screen spotlight
-/// coach marks (which punched cutout holes over two rects: the divider
-/// capsule and the interior corner handle); reused by the ghost gesture demo
-/// that replaced them (Justin, 2026-07-26) - EditorView resolves these into
-/// screen coordinates via a GeometryReader and uses them to place the ghost
-/// fingertip instead. The `corner` field was swapped for `bracket` (Justin,
-/// 2026-07-27): the demo's phase 1 now drags a canvas BRACKET vertex, not
-/// the interior corner handle (which, in a 2x2 grid, reads as "the middle
-/// point moving" - not what the demo should teach; see `centralDivider`'s
-/// doc comment in GestureController.swift). Chosen over publishing raw
-/// CGRects on EditorState because an
-/// Anchor<CGRect>, unlike a plain rect, resolves correctly regardless of the
-/// transforms/offsets/frames sitting between the two views (CanvasView's
-/// own centering GeometryReader, EditorView's VStack, etc.) - no manual
-/// coordinate-space bookkeeping needed on either end.
+/// Carries the real-geometry anchors the first-entry teach needs - the
+/// canvas CENTER, the divider capsule, and a canvas composition bracket - up
+/// the view tree from CanvasView (which computes them; see its "Coach mark
+/// geometry export" section) to EditorView. Originally built for the
+/// single-screen spotlight coach marks (which punched cutout holes over two
+/// rects: the divider capsule and the interior corner handle); reused by the
+/// ghost gesture demo that replaced them (Justin, 2026-07-26) - EditorView
+/// resolves these into screen coordinates via a GeometryReader and uses them
+/// to place the ghost fingertip instead. The `corner` field was swapped for
+/// `bracket` (Justin, 2026-07-27): the demo's phase 1 now drags a canvas
+/// BRACKET vertex, not the interior corner handle (which, in a 2x2 grid,
+/// reads as "the middle point moving" - not what the demo should teach; see
+/// `centralDivider`'s doc comment in GestureController.swift). `center` was
+/// added the same day (Justin, 2026-07-27): the demo now fades the fingertip
+/// in at the canvas's true center FIRST, before gliding to the bracket, so
+/// the user has a beat to register what they're looking at - see
+/// EditorView's `runGhostGestureDemo`. Chosen over publishing raw CGRects on
+/// EditorState because an Anchor<CGRect>, unlike a plain rect, resolves
+/// correctly regardless of the transforms/offsets/frames sitting between the
+/// two views (CanvasView's own centering GeometryReader, EditorView's
+/// VStack, etc.) - no manual coordinate-space bookkeeping needed on either
+/// end.
 struct CoachMarkAnchors {
+    var center: Anchor<CGRect>?
     var divider: Anchor<CGRect>?
     var bracket: Anchor<CGRect>?
 }
 
 struct CoachMarkAnchorsKey: PreferenceKey {
-    static var defaultValue = CoachMarkAnchors(divider: nil, bracket: nil)
+    static var defaultValue = CoachMarkAnchors(center: nil, divider: nil, bracket: nil)
 
-    /// Each of the two marker views in `coachMarkAnchorMarkers` sets only
-    /// one field and leaves the other nil, so a plain "keep whichever side
+    /// Each of the three marker views in `coachMarkAnchorMarkers` sets only
+    /// one field and leaves the others nil, so a plain "keep whichever side
     /// is already non-nil, else take the incoming one" merge is enough -
-    /// no risk of one marker's real value overwriting the other's.
+    /// no risk of one marker's real value overwriting another's.
     static func reduce(value: inout CoachMarkAnchors, nextValue: () -> CoachMarkAnchors) {
         let next = nextValue()
+        if value.center == nil { value.center = next.center }
         if value.divider == nil { value.divider = next.divider }
         if value.bracket == nil { value.bracket = next.bracket }
     }
@@ -334,11 +340,11 @@ struct CanvasView: View {
 
     // MARK: - Coach mark geometry export (Justin, 2026-07-26)
 
-    /// The two rects the first-entry teach cares about - the divider capsule
-    /// closest to canvas center ("most central/first divider" per the
-    /// original coach-marks brief) and the bottom-right composition bracket
-    /// vertex - in CANVAS-LOCAL coordinates (same space as
-    /// `cell.rect`/`capsuleSpecs`/`bracketAnchor` above). Already sized to
+    /// The rects the first-entry teach cares about - the canvas's true
+    /// center point, the divider capsule closest to it ("most central/first
+    /// divider" per the original coach-marks brief), and the TOP-RIGHT
+    /// composition bracket vertex - in CANVAS-LOCAL coordinates (same space
+    /// as `cell.rect`/`capsuleSpecs`/`bracketAnchor` above). Already sized to
     /// the same comfortable hit-zone conventions `classifyTouch` uses (44pt
     /// capsule band, 44x44 bracket square) rather than inventing new padding
     /// numbers. Originally these sized the old spotlight coach marks' cutout
@@ -348,12 +354,14 @@ struct CanvasView: View {
     /// single-photo canvas); the demo skips its divider phase then (see
     /// EditorView's `centralDivider` usage). `bracket` is never nil - the
     /// composition brackets are always visible regardless of layout (see
-    /// `bracketsOverlay` below), so the demo's phase 1 always has somewhere
-    /// to land (Justin, 2026-07-27: replaces the old interior-corner-handle
-    /// target, which in a 2x2 grid was indistinguishable from "the middle
-    /// point moving" - not what the demo should teach).
-    private func coachMarkTargetRects(cells: [CellFrame], gutterPts: Double) -> (divider: CGRect?, bracket: CGRect) {
-        let center = CGPoint(x: state.canvasSize.width / 2, y: state.canvasSize.height / 2)
+    /// `bracketsOverlay` below), so the demo's phase always has somewhere to
+    /// land. `bracket` moved from bottom-right to TOP-RIGHT (Justin,
+    /// 2026-07-27 - "the upper right is more visible"); `center` is new the
+    /// same day, a fixed 44x44 square straddling the canvas midpoint so the
+    /// demo's opening beat has somewhere concrete to fade the fingertip in
+    /// at before it glides anywhere.
+    private func coachMarkTargetRects(cells: [CellFrame], gutterPts: Double) -> (center: CGRect, divider: CGRect?, bracket: CGRect) {
+        let centerPoint = CGPoint(x: state.canvasSize.width / 2, y: state.canvasSize.height / 2)
         var bestDivider: (rect: CGRect, dist: CGFloat)?
 
         for cell in cells {
@@ -362,16 +370,17 @@ struct CanvasView: View {
 
             for spec in capsuleSpecs(cellRect: cell.rect, owners: owners, gutterPts: gutterPts) {
                 let hitZone = capsuleHitZone(spec)
-                let d = hypot(hitZone.midX - center.x, hitZone.midY - center.y)
+                let d = hypot(hitZone.midX - centerPoint.x, hitZone.midY - centerPoint.y)
                 if bestDivider == nil || d < bestDivider!.dist {
                     bestDivider = (hitZone, d)
                 }
             }
         }
 
-        let bracketVertex = bracketAnchor(.bottomRight, canvasSize: state.canvasSize)
+        let centerRect = CGRect(x: centerPoint.x - 22, y: centerPoint.y - 22, width: 44, height: 44)
+        let bracketVertex = bracketAnchor(.topRight, canvasSize: state.canvasSize)
         let bracketRect = CGRect(x: bracketVertex.x - 22, y: bracketVertex.y - 22, width: 44, height: 44)
-        return (bestDivider?.rect, bracketRect)
+        return (centerRect, bestDivider?.rect, bracketRect)
     }
 
     /// Invisible markers (zero visual/hit-test footprint) placed exactly at
@@ -391,18 +400,24 @@ struct CanvasView: View {
             // fills the whole canvas, so attaching afterward publishes the
             // canvas bounds instead of the 44pt target (the giant-spotlight
             // bug caught in the 2026-07-26 review pass).
+            Color.clear
+                .frame(width: targets.center.width, height: targets.center.height)
+                .anchorPreference(key: CoachMarkAnchorsKey.self, value: .bounds) { anchor in
+                    CoachMarkAnchors(center: anchor, divider: nil, bracket: nil)
+                }
+                .position(x: targets.center.midX, y: targets.center.midY)
             if let rect = targets.divider {
                 Color.clear
                     .frame(width: rect.width, height: rect.height)
                     .anchorPreference(key: CoachMarkAnchorsKey.self, value: .bounds) { anchor in
-                        CoachMarkAnchors(divider: anchor, bracket: nil)
+                        CoachMarkAnchors(center: nil, divider: anchor, bracket: nil)
                     }
                     .position(x: rect.midX, y: rect.midY)
             }
             Color.clear
                 .frame(width: targets.bracket.width, height: targets.bracket.height)
                 .anchorPreference(key: CoachMarkAnchorsKey.self, value: .bounds) { anchor in
-                    CoachMarkAnchors(divider: nil, bracket: anchor)
+                    CoachMarkAnchors(center: nil, divider: nil, bracket: anchor)
                 }
                 .position(x: targets.bracket.midX, y: targets.bracket.midY)
         }
@@ -469,7 +484,11 @@ struct CanvasView: View {
             .onEnded { value in
                 let p = normalizedSamplePoint(value.location)
                 withAnimation(.easeInOut(duration: 0.12)) { loupeTouch = nil }
-                state.applySampledColor(atNormalized: p)
+                // `applySampledColor` is `async` (Justin, 2026-07-27) so it
+                // can wait out an in-flight composite render on a fast
+                // release rather than silently failing - see its doc
+                // comment in EditorState.swift.
+                Task { await state.applySampledColor(atNormalized: p) }
             }
     }
 

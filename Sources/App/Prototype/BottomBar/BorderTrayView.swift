@@ -29,13 +29,16 @@ struct BorderTrayView: View {
 
     private var sliders: some View {
         VStack(spacing: 6) {
-            sliderRow(title: "Thickness", value: thicknessBinding)
+            // Sticky thickness (Justin, 2026-07-27): only the Thickness
+            // slider commits to EditorState's remembered-thickness
+            // preference on release - Radius has no such memory feature.
+            sliderRow(title: "Thickness", value: thicknessBinding, isThickness: true)
             sliderRow(title: "Radius", value: radiusBinding)
         }
         .padding(.horizontal, 16)
     }
 
-    private func sliderRow(title: String, value: Binding<Double>) -> some View {
+    private func sliderRow(title: String, value: Binding<Double>, isThickness: Bool = false) -> some View {
         HStack(spacing: 10) {
             Text(title)
                 .font(.system(size: 11, weight: .semibold))
@@ -45,7 +48,16 @@ struct BorderTrayView: View {
                 .frame(width: 72, alignment: .leading)
             Slider(value: value, in: 0...100, onEditingChanged: { editing in
                 withAnimation(.easeInOut(duration: 0.15)) { state.isAdjustingBorder = editing }
-                if editing { state.beginGesture() } else { state.commitGesture() }
+                if editing {
+                    state.beginGesture()
+                } else {
+                    state.commitGesture()
+                    // Sticky thickness (Justin, 2026-07-27): remember
+                    // whatever the user just landed on - including a
+                    // deliberate 0 - and retire the Border tray's
+                    // auto-starter for this document permanently.
+                    if isThickness { state.commitBorderThicknessChoice() }
+                }
             })
             .tint(Color.mosaicAccent)
         }
@@ -68,28 +80,45 @@ struct BorderTrayView: View {
 
     // MARK: Swatches
 
-    /// Seventh swatch + eyedropper (Justin, 2026-07-26): the row is now 9
+    /// Seventh swatch + eyedropper (Justin, 2026-07-26): the row was 9
     /// elements - white, black, vibrant1-3, brightest, luminous, the B11
-    /// eyedropper, and "+". 9*38 + 8*3 + 2*10 = 386pt fits a 393pt screen;
-    /// 38pt tap targets sit slightly under the usual 40pt floor but remain
-    /// comfortable for well-spaced circles (they were 42pt at 7 elements).
+    /// eyedropper, and "+" - fixed at 9*38 + 8*3 + 2*10 = 386pt, which just
+    /// fits a 393pt screen.
+    ///
+    /// Remembered eyedropper picks (Justin, 2026-07-27): up to 2 more
+    /// swatches (`state.recentSampledSwatches`, newest first) now insert
+    /// immediately before the eyedropper button, so the row can hold up to
+    /// 11 elements - which no longer fits at any reasonable tap-target size
+    /// (11*36 + 10*3 + 2*10 = 446pt, already over budget even at the 36pt
+    /// floor). Rather than shrink targets further or truncate the row,
+    /// `swatchRow` is now a horizontally scrollable `ScrollView` - the fixed
+    /// 7 swatches + up to 2 recent picks + eyedropper + "+" all keep their
+    /// existing 38pt tap targets (still >= the 36pt floor) and are simply
+    /// reachable by a short swipe when the recent picks push the row past
+    /// the screen edge; with 0-1 recent picks (the common case) everything
+    /// still fits with no scrolling needed at all.
     private let swatchSpacing: CGFloat = 3
     private let swatchTapTarget: CGFloat = 38
     private let swatchDiameter: CGFloat = 30
 
     private var swatchRow: some View {
-        HStack(spacing: swatchSpacing) {
-            swatch(.white)
-            swatch(RGBA(r: 0, g: 0, b: 0, a: 1))
-            swatch(state.derivedSwatches.vibrant1)
-            swatch(state.derivedSwatches.vibrant2)
-            swatch(state.derivedSwatches.vibrant3)
-            swatch(state.derivedSwatches.brightest)
-            swatch(state.derivedSwatches.luminous)
-            eyedropperButton
-            addSwatchButton
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: swatchSpacing) {
+                swatch(.white)
+                swatch(RGBA(r: 0, g: 0, b: 0, a: 1))
+                swatch(state.derivedSwatches.vibrant1)
+                swatch(state.derivedSwatches.vibrant2)
+                swatch(state.derivedSwatches.vibrant3)
+                swatch(state.derivedSwatches.brightest)
+                swatch(state.derivedSwatches.luminous)
+                ForEach(Array(state.recentSampledSwatches.enumerated()), id: \.offset) { _, rgba in
+                    swatch(rgba)
+                }
+                eyedropperButton
+                addSwatchButton
+            }
+            .padding(.horizontal, 10)
         }
-        .padding(.horizontal, 10)
     }
 
     /// B11 loupe eyedropper (Justin, 2026-07-26): arms the canvas eyedropper

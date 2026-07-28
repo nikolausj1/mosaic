@@ -12,7 +12,7 @@ struct MosaicApp: App {
 
 /// Phase 6 launch routing (PRD persistence table):
 ///   - current.json exists  -> restore straight into the Editor.
-///   - no current.json      -> Picker (with "Edit last collage" if last.json exists).
+///   - no current.json      -> Picker.
 /// Confirming a selection in the Picker hands a built Document to EditorView
 /// ("New collage committed" - archives any current.json to last.json first,
 /// then starts autosaving the new document as current). Done on the save
@@ -20,12 +20,17 @@ struct MosaicApp: App {
 ///
 /// Nothing-is-destructive navigation (Justin, 2026-07-26): the editor's back
 /// button (`onNew:`) no longer discards anything - it just returns to the
-/// Picker, leaving current.json exactly as autosave last wrote it. The
-/// Picker then offers "Continue current collage" (current.json) alongside
-/// "Edit last collage" (last.json) - both can exist at once. The only way
-/// current.json is ever replaced is by confirming a NEW pick, which archives
-/// the old current to last first (see `commitNewCollage`) - so nothing is
-/// ever silently lost, only ever superseded.
+/// Picker, leaving current.json exactly as autosave last wrote it. The only
+/// way current.json is ever replaced is by confirming a NEW pick, which
+/// archives the old current to last first (see `commitNewCollage`) - so
+/// nothing is ever silently lost, only ever superseded. The Picker itself no
+/// longer offers an in-flow "Continue current collage" / "Edit last collage"
+/// entry point (Justin, 2026-07-27 - Justin: "easy to recreate, not a big
+/// deal"), but the persistence contract those rows used to expose is
+/// unchanged: current.json still restores automatically on cold launch
+/// (`applyLaunchArgsIfNeeded` below) and Done on the save sheet still
+/// archives current -> last (`onDone` below) - only the picker's manual
+/// re-entry points to files that already exist are gone.
 struct ContentView: View {
     @State private var pickerState = PickerState()
     @State private var editorState: EditorState?
@@ -43,12 +48,12 @@ struct ContentView: View {
                     storeService: storeService,
                     // Nothing-is-destructive navigation (Justin, 2026-07-26):
                     // this is just "back to photos" now, not a discard.
-                    // current.json stays exactly as autosave last wrote it -
-                    // the Picker's "Continue current collage" row is how you
-                    // get back in. Picking a NEW set is what actually
-                    // replaces this collage (it archives current -> last
-                    // first, see `commitNewCollage`); backing out here never
-                    // throws anything away.
+                    // current.json stays exactly as autosave last wrote it,
+                    // even though the Picker no longer has an in-flow entry
+                    // point back to it (Justin, 2026-07-27). Picking a NEW
+                    // set is what actually replaces this collage (it archives
+                    // current -> last first, see `commitNewCollage`); backing
+                    // out here never throws anything away.
                     onNew: {
                         self.editorState = nil
                     },
@@ -60,7 +65,7 @@ struct ContentView: View {
                     // Screen C's Done button: archive current -> last (PRD:
                     // "Save (Done on the save sheet): current.json ->
                     // last.json; current.json deleted"), then dismiss back
-                    // to the Picker, which will now offer "Edit last collage".
+                    // to the Picker.
                     onDone: {
                         DocumentStore.archiveCurrentAsLast()
                         self.editorState = nil
@@ -72,14 +77,6 @@ struct ContentView: View {
                     storeService: storeService,
                     onConfirmed: { doc, images in
                         commitNewCollage(document: doc, images: images)
-                    },
-                    hasCurrentCollage: DocumentStore.hasCurrentCollage,
-                    onContinueCurrent: {
-                        Task { await continueCurrentCollage() }
-                    },
-                    hasLastCollage: DocumentStore.hasLastCollage,
-                    onEditLastCollage: {
-                        Task { await editLastCollage() }
                     }
                 )
             }
@@ -111,26 +108,10 @@ struct ContentView: View {
         let state = EditorState(document: document, images: images, photoStore: PhotoStore(), layoutIndex: 0)
         // Fresh-pick arrivals open with the Layout tray up (Justin,
         // 2026-07-17): choosing the topology is the natural first move
-        // after choosing photos. Restore/edit-last arrive quiet - this is
-        // only for the pick flow.
+        // after choosing photos. Cold-launch restore (`restoreEditor` below)
+        // arrives quiet - this is only for the pick flow.
         state.activeTray = .layout
         editorState = state
-    }
-
-    /// "Edit last collage" (PRD): last.json -> current.json, restored into
-    /// the Editor.
-    private func editLastCollage() async {
-        guard let document = DocumentStore.promoteLastToCurrent() else { return }
-        await restoreEditor(from: document)
-    }
-
-    /// "Continue current collage" (Justin, 2026-07-26): current.json is
-    /// already current, so unlike `editLastCollage` above there's no
-    /// promotion step - just load it back into the Editor via the same
-    /// restore path launch uses.
-    private func continueCurrentCollage() async {
-        guard let document = DocumentStore.loadCurrent() else { return }
-        await restoreEditor(from: document)
     }
 
     /// Launch-time restore (PRD: "Launch, current.json exists -> Editor,

@@ -1,8 +1,8 @@
 ---
 title: "Ship Plan - Mosaic App Store Readiness"
 created: 2026-07-26
-modified: 2026-07-26
-version: 1.1
+modified: 2026-07-28
+version: 1.2
 author: Claude Fable 5 (claude-fable-5)
 tags:
 ---
@@ -33,7 +33,8 @@ The app itself is nearly ready: no TODOs, no stray prints, debug HUD properly DE
 - [x] **Pricing at launch - DECIDED 2026-07-26 (Justin): freemium.** Free download, all features; exports carry a small corner Mosaic watermark; a one-time StoreKit 2 non-consumable purchase (com.levelup.mosaic.removewatermark, placeholder $2.99) removes it. B8 pulled into v1 scope; built per the B8 spec (watermark ~4% of long edge, bottom-right, white with dark stroke) with the B28 gear-in-picker settings ingress. Final price set in App Store Connect.
 - [x] **The name question (B16) - DECIDED 2026-07-26 (Justin): option (a).** Keep Mosaic as the brand; submit under a compound App Store title such as "Mosaic: Photo Collage & Layout" (exact wording finalized with listing copy). Mitigates the ASO collision with the existing "Mosaic - Video & Photo Collage" (id 633846868) and the photomosaic search cluster. Known residual: trademark risk stays open (13 leading matches per B16); accepted for now.
 - [ ] **Accent color** (~10 min) - mockups in `_review/phase7-accent-*.png`. The icon accent should follow this decision.
-- [ ] **Apple Developer Program** ($99/yr) and App Store Connect app record - requires Justin's Apple ID. Claude can prepare every field's contents in advance.
+- [x] **Apple Developer Program + commercial setup - DONE (verified 2026-07-28).** Paid Apps Agreement Active (Jul 27 2026 - Apr 16 2027), Free Apps Agreement Active, Wells Fargo (5742) USD bank account Active, U.S. Form W-9 Active, EU Digital Services Act trader status Active. This was the long pole; the app can now sell the watermark unlock.
+- [x] **App Store Connect record - CREATED 2026-07-28.** Apple ID **6795437010**, name **"Mosaic: Photo Collage & Layout"** (the name WAS available and is now reserved), bundle `com.levelup.mosaic`, SKU `mosaic-ios-001`, primary language English (U.S.), iOS only, Full Access. Prerequisite discovered and fixed en route: `com.levelup.mosaic` had never been registered as an explicit App ID (Xcode's automatic signing had not created it), so it was registered in Certificates, Identifiers & Profiles as "Mosaic Photo Collage" under team 6A4J2GTB6F first.
 - [ ] **One TestFlight tester besides Justin** (per STATUS checklist).
 - [ ] Final pass on reversible decisions B1, B3, B4, B5, B6 (audit lists them; all still look sound).
 
@@ -50,7 +51,8 @@ Direction, grounded in research: every collage competitor (PicCollage, Unfold, C
 - [x] App Store listing: drafted 2026-07-26 in `App Store Listing.md` (title, subtitle, keywords, description, promo text, featuring pitch) - awaiting Justin's review.
 - [ ] Screenshots: none exist. Produce a designed set (device frames, captions, dark canvas) from simulator captures.
 - [ ] Optional app preview video (later; screenshots first).
-- [ ] Privacy nutrition label answers (trivial: no data collected, no tracking, no network).
+- [ ] Privacy nutrition label answers (trivial: no data collected, no tracking, no network) - enter in App Store Connect.
+- [x] **Privacy policy + support pages - LIVE 2026-07-28** (both URLs are mandatory listing fields): https://nikolausj1.github.io/mosaic-app-site/privacy.html and https://nikolausj1.github.io/mosaic-app-site/support.html . Repo `nikolausj1/mosaic-app-site` (public, site files only); source of truth also kept in `_site/`. The policy deliberately avoids the absolute "no network calls" claim and discloses that StoreKit and iCloud Photos talk to Apple under Apple's own policy.
 
 ## Sequencing
 

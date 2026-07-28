@@ -1,8 +1,8 @@
 ---
 title: "STATUS - Photo Collage"
 created: 2026-07-24
-modified: 2026-07-27
-version: 2.1
+modified: 2026-07-28
+version: 2.2
 author: Claude Fable 5 (claude-fable-5)
 tags:
 ---
@@ -43,8 +43,7 @@ Active Development (Phase 6 of 7 complete; Phase 7, visual polish, in progress)
       - unblocks: closing the first-run teaching design and B11 for good
 - [ ] **Judge the tap-bug fix + bracket demo (2026-07-27, deployed)**: the wrong-photo-selected bug is ROOT-CAUSED and fixed - the collapsing hero header sat above the grid's ScrollView, so collapsing it shrank the layout ~72pt and slid the grid under your finger mid-tap (intermittent because it only bit while the hero was collapsing near the top). The hero is now a fixed-height brand moment, no collapse; verified with a 48-photo numbered test library, four consecutive select/deselect operations all landing exactly, including immediately after a scroll. Also: the inactive CTA is now truly opaque (SwiftUI's .disabled() was dimming the whole button, including the opaque fill); and the ghost demo now drags a CANVAS CORNER BRACKET to reshape the aspect ratio freehand instead of the interior middle point (~10 min)
       - unblocks: closing the selection-bug report for good; if you still want the hero to shrink on scroll, it has to move INSIDE the scroll view as content - say the word
-- [ ] **Check developer.apple.com/account with your Apple ID** - confirm whether the membership is the paid Apple Developer Program or the free tier; TestFlight and App Store submission need the paid one ($99/yr), and no rostered project has shipped to the App Store yet so it may never have been needed (~5 min)
-      - unblocks: App Store Connect record, TestFlight, submission
+- [x] **DONE 2026-07-28: Apple developer/commercial setup verified and app record created.** Paid Apps Agreement, banking, W-9 and EU trader status all Active; App Store Connect record live as "Mosaic: Photo Collage & Layout" (Apple ID 6795437010, bundle com.levelup.mosaic). The name was available and is now reserved.
 - [ ] **Judge the just-shipped layout-tray-on-arrival and border-visibility fixes** in hand - both are code-verified/sim-verified only, not device-confirmed by you yet (~10 min)
       - unblocks: closing those two fixes with confidence
 

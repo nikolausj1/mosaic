@@ -331,14 +331,70 @@ final class EditorState {
     /// visible starter so the sliders demonstrably control something. One
     /// undo snapshot via the same begin/commit pair the slider itself uses;
     /// re-opening the tray with any nonzero border is a no-op.
+    ///
+    /// Sticky thickness (Justin, 2026-07-27): "A user might really like a
+    /// certain border thickness so lets not auto change it after they set
+    /// it." Two changes from the original: (1) the starter value is now
+    /// whatever the user last DELIBERATELY chose (see
+    /// `commitBorderThicknessChoice`/`rememberedBorderThickness` below),
+    /// falling back to the old 0.02 only before any preference has ever been
+    /// saved; (2) `hasCustomizedBorderThickness` makes this permanently a
+    /// no-op for the CURRENT document once the user has touched the
+    /// Thickness slider - even if they drag it back down to exactly zero,
+    /// which the old zero-check alone couldn't distinguish from "never
+    /// touched." A restored/edit-last document that already carries a
+    /// nonzero border still short-circuits on the zero-check below exactly
+    /// as before, independent of this flag.
     func applyBorderStarterIfZero() {
+        guard !hasCustomizedBorderThickness else { return }
         guard document.border.inner == 0, document.border.outer == 0 else { return }
         beginGesture()
-        // 0.045 on first pass read as too heavy (Justin, 2026-07-26) -
-        // 0.02 (~13% of the slider) shows the border exists without
-        // committing the composition to a chunky frame.
-        setBorderThickness(0.02)
+        setBorderThickness(Self.rememberedBorderThickness)
         commitGesture()
+    }
+
+    /// True once the user has ended a Thickness slider drag for the CURRENT
+    /// document (any resulting value, including a deliberate 0) - see
+    /// BorderTrayView's Thickness `sliderRow`, which calls
+    /// `commitBorderThicknessChoice()` on release. Per-EditorState-instance
+    /// (not persisted): a fresh EditorState - a new document, or the same
+    /// document reopened in a later session - starts false again, so
+    /// `applyBorderStarterIfZero` gets exactly one more chance to apply the
+    /// remembered starter on a document whose border happens to still be
+    /// zero, matching "untouched" rather than "the user chose zero just
+    /// now."
+    private(set) var hasCustomizedBorderThickness = false
+
+    /// UserDefaults key for the cross-document/cross-session "last
+    /// deliberately-chosen thickness" (Justin, 2026-07-27). Read/written via
+    /// plain UserDefaults rather than the `@AppStorage` property wrapper:
+    /// `@Observable`'s macro already manages this class's stored-property
+    /// storage, and composing it with a second property wrapper on the same
+    /// property isn't supported - reading/writing UserDefaults directly here
+    /// gets the identical persistence (same suite, same key) without that
+    /// conflict. `BorderTrayView` (a plain SwiftUI View) is where the write
+    /// actually happens, via this same key.
+    static let lastBorderThicknessDefaultsKey = "lastBorderThickness"
+
+    /// The remembered starter value: whatever the user last deliberately
+    /// committed, or 0.02 (the original hardcoded starter) the very first
+    /// time this key has never been written. `object(forKey:)` (not
+    /// `double(forKey:)`) is what makes that distinction possible -
+    /// `double(forKey:)` returns 0 for an absent key, indistinguishable from
+    /// a genuinely-saved 0.
+    private static var rememberedBorderThickness: Double {
+        (UserDefaults.standard.object(forKey: lastBorderThicknessDefaultsKey) as? Double) ?? 0.02
+    }
+
+    /// Called by BorderTrayView's Thickness slider on release (`editing ==
+    /// false`, right after `commitGesture()`) - persists whatever thickness
+    /// the user just landed on (including 0) as the new cross-session
+    /// default, and permanently retires `applyBorderStarterIfZero` for this
+    /// document/session. NOT called for the Radius slider - only Thickness
+    /// is "the border" in the sense this feature is about.
+    func commitBorderThicknessChoice() {
+        hasCustomizedBorderThickness = true
+        UserDefaults.standard.set(document.border.inner, forKey: Self.lastBorderThicknessDefaultsKey)
     }
 
     /// B11 canvas eyedropper (Justin, 2026-07-26): true while the Border
@@ -359,6 +415,16 @@ final class EditorState {
     /// sampling isn't armed.
     private(set) var samplingComposite: UIImage?
 
+    /// The in-flight composite render kicked off by `beginColorSampling`
+    /// (Justin, 2026-07-27 - see its doc comment for the bug this closes).
+    /// Tracked so a second `beginColorSampling()` can CANCEL a still-running
+    /// prior render (rather than leaving two renders racing to write
+    /// `samplingComposite`, where the OLDER one could theoretically resolve
+    /// last and clobber the newer result with stale pixels), and so
+    /// `applySampledColor` can `await` it when the user releases before the
+    /// render has resolved, instead of silently failing.
+    private var samplingRenderTask: Task<Void, Never>?
+
     /// Arms the eyedropper AND kicks off the one-time composite render the
     /// loupe magnifies from - called instead of setting `isSamplingColor`
     /// directly (see BorderTrayView's eyedropper button) so the render
@@ -366,7 +432,31 @@ final class EditorState {
     /// touch. The render itself reuses already-decoded in-memory proxies
     /// (no Photos re-decode), so in practice it resolves within a frame or
     /// two of arming.
+    ///
+    /// BUG FIX (Justin, 2026-07-27): "the eyedropper broke after one
+    /// selection - it appears to work only once per editor session."
+    /// Reproducing this on-device pointed at a race, not a state-reset bug:
+    /// `applySampledColor` (below) read `samplingComposite` and, if it was
+    /// still nil (the async render from THIS arm hadn't resolved yet -
+    /// e.g. a quick tap-release, which naturally becomes more likely the
+    /// SECOND time a user reaches for the eyedropper, once they already
+    /// know the gesture and move faster than their first, exploratory
+    /// drag), it silently gave up via `defer { endColorSampling() }`
+    /// disarming with no color applied and no error of any kind - which
+    /// reads exactly as "stopped working," and once it happens once, every
+    /// later attempt that also beats the render is silently eaten the same
+    /// way. `samplingComposite`/`isSamplingColor` themselves WERE being
+    /// reset/rebuilt correctly on every arm, as this method's body already
+    /// shows - the actual gap was that NOTHING waited for the rebuild before
+    /// the release handler gave up on it. Fixed two ways: (1)
+    /// `applySampledColor` now awaits the in-flight render (via
+    /// `samplingRenderTask`) if the composite isn't ready the instant the
+    /// user releases, instead of failing silently; (2) this method now
+    /// cancels any still-running PRIOR render before starting a new one, so
+    /// two renders can never race to write `samplingComposite` and a stale
+    /// one can never clobber a fresh arm's result.
     func beginColorSampling() {
+        samplingRenderTask?.cancel()
         isSamplingColor = true
         samplingComposite = nil
         let width = 900.0
@@ -374,9 +464,10 @@ final class EditorState {
         let exportSize = CGSize(width: width, height: (width * aspect).rounded())
         let proxies = images
         let doc = document
-        Task { [weak self] in
+        samplingRenderTask = Task { [weak self] in
             let provider: CollageImageProvider = { id, _ in proxies[id]?.cgImage }
             let rendered = await CollageRenderer().renderForSampling(document: doc, exportSize: exportSize, imageProvider: provider)
+            guard !Task.isCancelled else { return }
             self?.samplingComposite = rendered
         }
     }
@@ -387,6 +478,8 @@ final class EditorState {
     func endColorSampling() {
         isSamplingColor = false
         samplingComposite = nil
+        samplingRenderTask?.cancel()
+        samplingRenderTask = nil
     }
 
     /// Reads the composited pixel at a normalized canvas point (0...1 in
@@ -394,11 +487,59 @@ final class EditorState {
     /// border color - the loupe's release action (and a plain tap, which is
     /// just a drag that never moved - see CanvasView's `loupeDragGesture`).
     /// A no-op (still disarms) if the composite hasn't resolved yet.
-    func applySampledColor(atNormalized point: CGPoint) {
+    /// `async` (Justin, 2026-07-27, was synchronous) so the release handler
+    /// can wait out an in-flight composite render instead of racing it - see
+    /// `beginColorSampling`'s bug-fix doc comment for the failure this
+    /// closes. `samplingRenderTask` is read (not consumed) here since
+    /// `endColorSampling()` in the `defer` below is what tears it down.
+    func applySampledColor(atNormalized point: CGPoint) async {
         defer { endColorSampling() }
+        if samplingComposite == nil {
+            await samplingRenderTask?.value
+        }
         guard let composite = samplingComposite, let rgba = Self.pixelColor(in: composite, atNormalized: point) else { return }
         setBorderColor(rgba)
+        rememberSampledSwatch(rgba)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    // MARK: - Recently-sampled swatches (Justin, 2026-07-27)
+
+    /// The eyedropper's own picks, newest first, capped at 2 - shown in the
+    /// swatch row alongside the fixed derived swatches so the user can
+    /// toggle back and forth (e.g. between a fresh pick and white) without
+    /// re-sampling. Session-only per the brief ("They live for the editor
+    /// session ... no persistence needed") - a plain instance property, not
+    /// backed by UserDefaults/DocumentStore, so it resets with a fresh
+    /// EditorState same as `recentSampledSwatches`'s sibling session state
+    /// elsewhere in this file.
+    private(set) var recentSampledSwatches: [RGBA] = []
+
+    /// Fuzzy equality for swatch dedupe - mirrors BorderTrayView's own
+    /// `colorsMatch` (alpha isn't compared; every border swatch is fully
+    /// opaque).
+    private static func swatchesMatch(_ a: RGBA, _ b: RGBA) -> Bool {
+        abs(a.r - b.r) < 0.01 && abs(a.g - b.g) < 0.01 && abs(a.b - b.b) < 0.01
+    }
+
+    /// Inserts a freshly-sampled color at the front of `recentSampledSwatches`.
+    /// Dedupes against the seven FIXED swatches (white/black/vibrant1-3/
+    /// brightest/luminous) - those are already reachable elsewhere in the
+    /// row, so a pick that lands on one of them contributes nothing new. A
+    /// pick that matches something ALREADY in the recent list is bumped to
+    /// the front (removed, then reinserted) rather than duplicated, so the
+    /// row never shows two identical circles. Caps at 2 - the oldest falls
+    /// off the end.
+    private func rememberSampledSwatch(_ rgba: RGBA) {
+        let fixed = [
+            RGBA.white, RGBA(r: 0, g: 0, b: 0, a: 1),
+            derivedSwatches.vibrant1, derivedSwatches.vibrant2, derivedSwatches.vibrant3,
+            derivedSwatches.brightest, derivedSwatches.luminous,
+        ]
+        guard !fixed.contains(where: { Self.swatchesMatch($0, rgba) }) else { return }
+        recentSampledSwatches.removeAll { Self.swatchesMatch($0, rgba) }
+        recentSampledSwatches.insert(rgba, at: 0)
+        if recentSampledSwatches.count > 2 { recentSampledSwatches.removeLast() }
     }
 
     /// Reads one pixel from `image` at a normalized position via a 1x1
