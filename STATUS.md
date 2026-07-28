@@ -2,7 +2,7 @@
 title: "STATUS - Photo Collage"
 created: 2026-07-24
 modified: 2026-07-28
-version: 2.5
+version: 3.0
 author: Claude Fable 5 (claude-fable-5)
 tags:
 ---
@@ -15,47 +15,41 @@ Mosaic, an iOS collage app (the spiritual successor to Instagram's discontinued 
 
 ## Stage
 
-Active Development (Phase 6 of 7 complete; Phase 7, visual polish, in progress)
+Active Development, in App Store preparation. Feature-complete for v1 including the freemium unlock; the App Store Connect record exists and most listing metadata is entered.
 
 ## Health
 
-🟡 At-risk - feature-complete including the new freemium unlock, and submission-config clean, but nothing has been verified end-to-end with your own real photos yet (every phase's "happy path" was proven on the simulator or with bundled test photos), and B27 (onboarding) plus the accent/icon picks are still open.
+🟡 At-risk - a great deal has been built and verified in the simulator, but **almost none of it has been used on a real phone**, and one finding makes that gap worse than it looked: Vision fails silently in the iOS Simulator, so every simulator judgement of auto-framing was of the fallback, not the feature. The device pass is now the single highest-value hour available.
 
 ## Waiting on Me
 
-- [ ] **Run the B26 device checklist** - now a guided tap-through page you can open on your phone: https://claude.ai/code/artifact/305b73b7-df5c-4e5b-8c15-4ed499e89625 (~30 min)
-      - unblocks: the only remaining unverified path to "done," and Phase 7 sign-off
-- [ ] **Try the new freemium flow in an Xcode run** - Save with watermark, the paywall from the save sheet's Remove link, a test purchase (Mosaic.storekit is wired into the scheme so the $2.99 unlock works in Simulator/device runs from Xcode), then a Save without watermark (~10 min)
+- [ ] **Run the device pass** - one guided checklist covering the original eight B26 checks plus everything built since: https://claude.ai/code/artifact/305b73b7-df5c-4e5b-8c15-4ed499e89625 (~45 min). Judge auto-framing and Magic Layout hardest; they have had the least honest evaluation.
+      - unblocks: B26, Phase 7 sign-off, and the Magic Layout pacing decision
+- [ ] **Decide Magic Layout pacing** - the reveal adds roughly 1.5s+ per collage. Recommendation on record: ration it (full show on the first collage, short after) rather than trimming the choreography. Needs your gut after four collages in a row (~5 min, during the device pass)
+      - unblocks: B32 Phase 3
+- [ ] **Set the real IAP price and create the in-app purchase in App Store Connect** - $2.99 is a placeholder in `Mosaic.storekit`. The IAP must be submitted WITH the first version (~10 min)
+      - unblocks: submission
+- [ ] **Test a real purchase from an Xcode run** - StoreKit only attaches to the scheme in Xcode, not a plain install, so this cannot be verified any other way (~10 min)
       - unblocks: B8 sign-off
-- [ ] **Decide B27: onboarding.** You asked for splash + onboarding screens; the PRD locks a no-tutorials principle instead (first-launch auto-selected cell *is* the onboarding). Pick one: (a) hold the PRD line [Claude's recommendation], (b) one dismissible first-run hint, (c) full onboarding, which means formally rewriting the PRD principle (~5 min)
-      - unblocks: building or formally closing the onboarding question; can't submit to the App Store with this open
-- [ ] **Pick the accent color** - mockups in `_review/phase7-accent-*.png`; icon is now DECIDED (Justin supplied final brand assets 2026-07-26: tangram-M icon + mosaic lockup, integrated same day as app icon, picker masthead, and watermark chip) (~10 min)
-      - unblocks: Phase 7 visual polish sign-off
-- [ ] **Judge the full 2026-07-26 batch on your phone** (three deploys, latest has everything): deep-blue CTA and selection, full-screen first-run welcome flowing into the picker, single-screen spotlight coach marks with real cutout holes, thumbnail-size control (3/4/5 columns), Developer sheet (hammer icon: replay first-run, clear collages - MUST be gated before App Store submission, tracked in Ship Plan), plus everything from earlier: always-on divider handles, back-chevron header, nothing-is-destructive navigation, sixth brightest swatch, freemium watermark (~15 min)
-      - unblocks: Icon Composer layered build and Phase 7 sign-off
-- [ ] **Judge the picker rework (this session, 2026-07-26, second batch)**: welcome screen is now a slower, bigger title sequence (2.2x lockup, staggered teaching rows, a new quiet 4th line about on-device AI, "Get started" moved to the bottom as the same capsule as the floating CTA); the floating CTA's disabled state is now a flat opaque grey (no more see-through-looking fill); the thumbnail-size tap control is GONE, replaced by a pinch gesture directly on the grid (pinch in = more/smaller columns, out = fewer/bigger, like Photos); default grid is now 3 columns; the picker header got a real hero moment that collapses to a compact bar as you scroll and restores at the top; the Dev Tools icon moved from the header row into that hero's top-right corner and changed to the three-dot glyph; and the "wrong photo gets selected" bug you reported is fixed (root cause: the grid keyed cells by index instead of the photo's own stable ID, so a changed library between visits could show a stale photo under a live selection state) (~10 min)
-      - unblocks: closing the selection-bug report and folding this into the next full-batch device pass above
-- [ ] **Judge the editor batch (2026-07-26, final batch, deployed)**: spotlight coach marks now always teach the corner gesture (real cutout when the layout has a corner handle, a text tip when it doesn't); opening Border on a zero-border collage auto-bumps thickness to a visible starter; the export watermark uses your new watermark.png art; a 7th "luminous" derived swatch joins the row; and the color row gained a true canvas eyedropper (tap the eyedropper swatch, then tap any photo - that exact composited pixel becomes the border color) while the "+" system picker now presents from UIKit, fixing the eyedropper crash you reported (~10 min)
-      - unblocks: closing the eyedropper crash report and B11
-- [ ] **Judge the perf + polish pass (2026-07-26 night, deployed)**: picker lag and the 2-3s back-button delay fixed (root cause: the selection-bug fix was re-enumerating your whole photo library on every render; it now materializes once per fetch, and hero-collapse scroll updates are quantized); border starter reduced 0.045 to 0.02; coach marks now spotlight the CORNER handle (seam is a secondary text tip) (~5 min)
-      - unblocks: closing the picker performance report
-- [ ] **Judge the teach + eyedropper rework (2026-07-26 late night, deployed)**: first-run coach marks are GONE, replaced by a ghost gesture demo - a translucent fingertip drags the corner and then a seam on the user's own collage, live, then restores it exactly (tap skips; Dev sheet replay still works); the border eyedropper now has a proper magnifier loupe - touch and drag on the collage, a mag circle with crosshair and live color ring follows, release to apply (~5 min)
-      - unblocks: closing the first-run teaching design and B11 for good
-- [ ] **Judge B32 Magic Layout on your phone (INSTALLED 2026-07-28)** - faces now choose the layout AND you can watch them do it: glowing squares on each detected face, the arrangement resolving while they burn, then all theater clearing as the drag handles return. Unverified and worth checking first: skip-on-touch, Reduce Motion, the do-not-glow-a-clipped-face rule, the added wall clock, and whether the layout CHOICES look right on your own photos (scoring weights are placeholders). Full checklist: https://claude.ai/code/artifact/305b73b7-df5c-4e5b-8c15-4ed499e89625
-      - unblocks: Phase 3 (rationing + re-run affordance) and Phase 4 (tuning)
-- [ ] ~~Judge B32 Magic Layout Phases 0 + 1 (built 2026-07-28, NOT yet on your phone)~~ SUPERSEDED - the picker-to-editor cut is now a sequence: chosen photos stay lit in place while the rest dims, real face boxes light up, then they fly and morph into their cells. Phase 1's face-aware layout decision is built and tested in the Engine but not yet wired to the animation. **Two decisions waiting on you: the added wall clock is ~1.4s, not the spec's 400ms budget (see Ship Plan / my recommendation: keep the full show for the first collage only and cut later ones), and whether to wire Phase 1 in now or after you have felt Phase 0 on device.**
-      - unblocks: Phase 2 (divider search) and Phase 3 (rationing + re-run affordance)
-- [ ] **Judge the tap-bug fix + bracket demo (2026-07-27, deployed)**: the wrong-photo-selected bug is ROOT-CAUSED and fixed - the collapsing hero header sat above the grid's ScrollView, so collapsing it shrank the layout ~72pt and slid the grid under your finger mid-tap (intermittent because it only bit while the hero was collapsing near the top). The hero is now a fixed-height brand moment, no collapse; verified with a 48-photo numbered test library, four consecutive select/deselect operations all landing exactly, including immediately after a scroll. Also: the inactive CTA is now truly opaque (SwiftUI's .disabled() was dimming the whole button, including the opaque fill); and the ghost demo now drags a CANVAS CORNER BRACKET to reshape the aspect ratio freehand instead of the interior middle point (~10 min)
-      - unblocks: closing the selection-bug report for good; if you still want the hero to shrink on scroll, it has to move INSIDE the scroll view as content - say the word
-- [x] **DONE 2026-07-28: Apple developer/commercial setup verified and app record created.** Paid Apps Agreement, banking, W-9 and EU trader status all Active; App Store Connect record live as "Mosaic: Photo Collage & Layout" (Apple ID 6795437010, bundle com.levelup.mosaic). The name was available and is now reserved.
-- [ ] **Judge the just-shipped layout-tray-on-arrival and border-visibility fixes** in hand - both are code-verified/sim-verified only, not device-confirmed by you yet (~10 min)
-      - unblocks: closing those two fixes with confidence
+- [ ] **Finish the App Store Connect listing** - everything is drafted and most fields are entered; the save was blocked on the App Review contact phone number. All values are in `App Store Listing.md` (~10 min)
+      - unblocks: submission
+- [ ] **Build the layered app icon in Icon Composer** - GUI-only, no CLI exists, so this is the one asset that needs your hands (~20 min). Dark and tinted asset-catalog variants already ship, so this is an improvement rather than a blocker
+- [ ] **One TestFlight tester besides you** (~15 min)
+      - unblocks: submission
+- [ ] **Sign off the accent color** - mockups in `_review/phase7-accent-*.png`; the brand blues are locked in code, so this is a confirmation rather than an open choice (~5 min)
 
 ## Next Up
 
-1. Work the B26 checklist top to bottom on your phone with real photos (guided page linked above), the highest-value 30 minutes available; if it surfaces anything wrong with auto-framing, log real examples since B20 (auto-zoom) is flagged as the riskiest shipped feature and still collecting evidence.
-2. Decide B27 (onboarding) and pick accent + icon (round-3 candidates in `_review/phase7-ai-icons-r3-sheet.png`); Claude then finishes the Icon Composer build and starts listing copy, screenshots, and the landing page.
-3. Done 2026-07-26: Track 1 submission fixes (prototype photos out of Release, debug launch args gated, automatic signing, version alignment, privacy manifest, Photography category) and the full B8 freemium build (watermark + paywall + settings), sim-verified. Full diagnosis lives in `Ship Plan.md`.
+1. The device pass, top to bottom. It gates B26, the pacing decision, and any honest read on auto-framing quality.
+2. Report what the pass turns up; flags become the punch list.
+3. Then either B32 Phase 5 (canvas ratio joins the decision, see `Magic Layout Spec.md`) or the remaining App Store fields, depending on whether the goal is a better app or a submitted one.
+
+## Recently done (2026-07-28)
+
+- **B32 Magic Layout Phases 0, 1 and 2** - the picker-to-editor cut is now a sequence: chosen photos fly in, each detected face glows, the layout resolves while the glows burn, then all theater clears as the drag handles return. Faces genuinely choose the template and assignment, and dividers now move so a cell can grow to fit a group shot. On your phone (Phases 0-1); Phase 2 lands with the next deploy.
+- **B33 / Phase 5 specced** - canvas ratio joining the decision, which also gives the corner brackets something true to perform in the reveal.
+- **Repo pushed to GitHub** (`nikolausj1/mosaic`) - the week's work now exists in three places rather than only on this machine, after a Dropbox/disk failure made that risk concrete.
+- Earlier the same day: eyedropper sampling fix, bolder ghost-demo reshape, the Settings watermark upsell card, spanning App Store screenshots, icon appearance variants, privacy/support pages live.
 
 ## Ideas Shelf
 
@@ -88,25 +82,23 @@ Auto-framing quality (B20) is the one feature that can silently embarrass the ap
 
 ## App Store Readiness
 
-Done (2026-07-28)
+Done
 - [x] Apple Developer Program, Paid Apps Agreement, banking, W-9, EU trader status - all Active
-- [x] App Store Connect record: "Mosaic: Photo Collage & Layout", Apple ID 6795437010, bundle com.levelup.mosaic, SKU mosaic-ios-001 (App ID had to be registered first - Xcode never created it)
-- [x] Privacy policy + support pages live: https://nikolausj1.github.io/mosaic-app-site/privacy.html and /support.html
-- [x] App Store listing copy drafted (`App Store Listing.md`)
-- [x] Screenshots: five 6.9" (1320x2868) shots in `_store/screenshots/`
+- [x] App Store Connect record: "Mosaic: Photo Collage & Layout", Apple ID 6795437010, bundle com.levelup.mosaic
+- [x] Privacy policy + support pages live (GitHub Pages), both URLs verified
+- [x] Listing copy, App Review notes, age rating and nutrition-label answers drafted in `App Store Listing.md`
+- [x] Screenshots: five 6.9" panels, spanning-banner design, in `_store/screenshots-v2/`
 - [x] App icon dark + tinted appearance variants (verified compiled via assetutil)
 - [x] Submission config: no personal photos or debug launch args in Release, automatic signing, one version source, PrivacyInfo.xcprivacy, Photography category
-- [x] Working tree committed (7 commits, 2026-07-27/28)
+- [x] Source pushed to GitHub
 
 Still to do
-- [ ] **Justin: run the B26 device checklist** - https://claude.ai/code/artifact/305b73b7-df5c-4e5b-8c15-4ed499e89625
-- [ ] **Justin: one TestFlight tester besides you**
-- [ ] **Justin: set the real price** for the Remove Watermark unlock ($2.99 is a placeholder) and create the IAP product in App Store Connect
-- [ ] Fill the App Store Connect listing fields from `App Store Listing.md` + upload screenshots
-- [ ] Privacy nutrition label answers (no data collected, no tracking) - trivial, entered in App Store Connect
-- [ ] Age rating questionnaire
-- [ ] **Gate the Settings dev rows behind #if DEBUG** ("Replay first-run experience" / "Clear collages" currently ship in Release at Justin's request)
+- [ ] Everything in "Waiting on Me" above
+- [ ] **Gate the Settings dev rows behind #if DEBUG** - "Replay first-run experience" and "Clear collages" currently ship in Release at Justin's request; must be gated or removed before submission
+- [ ] Recapture the IAP review screenshot from an Xcode run so the button shows the real price
 - [ ] Archive + upload a build, then TestFlight
-- [ ] Featuring nomination (~3 months of lead time recommended; pitch drafted in `App Store Listing.md`)
+- [ ] Featuring nomination (~3 months lead time recommended; pitch drafted)
 
 Open risk: the "Mosaic" trademark question stays accepted-but-unresolved (13 leading matches, plus an existing App Store app in the category). The compound title helps discovery, not legal exposure.
+
+Structural risk: the project lives inside Dropbox, which caused a multi-hour outage on 2026-07-28 (file provider failing to serve repo files under disk pressure). Moving it to `~/Developer` is the real fix; Xcode projects in cloud-synced folders are a known-bad combination.
