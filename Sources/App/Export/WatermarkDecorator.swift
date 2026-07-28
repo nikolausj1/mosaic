@@ -28,9 +28,11 @@ struct WatermarkDecorator: ExportDecorator {
     let outerBorderFraction: Double
 
     func decorate(context: CGContext, size: CGSize) {
-        // Dedicated watermark art (Justin, 2026-07-26) - the lockup variant
-        // supplied specifically for exports, processed like "Lockup".
-        guard let lockup = UIImage(named: "Watermark"), lockup.size.height > 0 else { return }
+        // One lockup asset everywhere (Justin, 2026-07-27): the art supplied
+        // as watermark.png - same mark, lighter blue "o", easier to read -
+        // is now THE lockup, used by the picker masthead and the welcome
+        // screen too, so there is no second variant to keep in sync.
+        guard let lockup = UIImage(named: "Lockup"), lockup.size.height > 0 else { return }
 
         let shortEdge = min(size.width, size.height)
         let longEdge = max(size.width, size.height)

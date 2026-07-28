@@ -103,7 +103,7 @@ struct PaywallSheet: View {
                 .frame(width: 220, height: 220)
             // Mirrors WatermarkDecorator's chip-plus-lockup treatment so the
             // paywall shows exactly what a purchase removes.
-            Image("Watermark")
+            Image("Lockup")
                 .resizable()
                 .scaledToFit()
                 .frame(height: 12)

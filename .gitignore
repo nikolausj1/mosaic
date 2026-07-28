@@ -19,3 +19,6 @@ build/
 
 # Prototype test photos - personal, never committed (public repo)
 Sources/Resources/Prototype/
+
+# Generated source photos for App Store screenshots (regenerable, large)
+_store/*.jpg
