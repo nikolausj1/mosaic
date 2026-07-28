@@ -42,8 +42,11 @@ func defaultTemplateIndex(orientations: [CGSize]) -> Int {
 // MARK: - Content-fit slot assignment
 
 /// Rebuilds `node`'s tree, replacing each leaf (in traversal order) with the
-/// corresponding entry of `ids`. `ids.count` must equal the leaf count.
-private func replacingLeavesInOrder(_ node: Node, with ids: [PhotoID], cursor: inout Int) -> Node {
+/// corresponding entry of `ids`. `ids.count` must equal the leaf count. Not
+/// private: `MagicLayout.swift`'s `faceAwareAssignment` reuses this to
+/// materialize its own winning permutation, same as `contentFitAssignment`
+/// below.
+func replacingLeavesInOrder(_ node: Node, with ids: [PhotoID], cursor: inout Int) -> Node {
     switch node {
     case .leaf:
         let id = ids[cursor]
@@ -61,7 +64,10 @@ private func replacingLeavesInOrder(_ node: Node, with ids: [PhotoID], cursor: i
 /// input order" well-defined - the first minimal-cost permutation found in
 /// this enumeration is the one whose slot assignment is closest to the
 /// original ordering.
-private func permutations<T>(_ array: [T]) -> [[T]] {
+/// Not private: `MagicLayout.swift`'s `faceAwareAssignment` reuses this SAME
+/// enumeration (and therefore the same tie-break behavior) for its own
+/// per-template permutation search.
+func permutations<T>(_ array: [T]) -> [[T]] {
     guard array.count > 1 else { return [array] }
     var result: [[T]] = []
     for i in 0..<array.count {
@@ -74,12 +80,15 @@ private func permutations<T>(_ array: [T]) -> [[T]] {
     return result
 }
 
-private func aspect(_ size: CGSize) -> Double {
+// Not private: `MagicLayout.swift` reuses both overloads so its fallback
+// (no-mustKeep) cost term is textually the same computation as
+// `contentFitAssignment`'s, not just similarly shaped.
+func aspect(_ size: CGSize) -> Double {
     guard size.height > 0 else { return 1 }
     return Double(size.width) / Double(size.height)
 }
 
-private func aspect(_ rect: CGRect) -> Double {
+func aspect(_ rect: CGRect) -> Double {
     guard rect.height > 0 else { return 1 }
     return Double(rect.width) / Double(rect.height)
 }

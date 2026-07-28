@@ -740,6 +740,258 @@ do {
 }
 
 // =====================================================================
+// Phase 1 (B32 "Magic Layout") - mustKeepRegion: nil/empty edge cases,
+// mirroring autoFrame's own nil contract and thresholds exactly.
+// =====================================================================
+do {
+    check(mustKeepRegion(faces: [], faceConfidences: [], salientRegion: nil, photoPixelSize: CGSize(width: 2400, height: 1600)) == nil,
+          "mustKeepRegion: no faces/no saliency -> nil")
+
+    let salientBox = CGRect(x: 0.2, y: 0.3, width: 0.4, height: 0.3)
+    let salientOnly = mustKeepRegion(faces: [], faceConfidences: [], salientRegion: salientBox, photoPixelSize: CGSize(width: 2400, height: 1600))
+    check(salientOnly == salientBox, "mustKeepRegion: no surviving faces -> falls back to salientRegion untouched")
+
+    // Tiny face (pixel height below the 8%-of-short-edge floor, same as
+    // autoFrame's Anchor D) is discarded; no saliency either -> nil.
+    let tinyFaceOnly = mustKeepRegion(
+        faces: [CGRect(x: 0.4, y: 0.2, width: 0.1, height: 0.05)],
+        faceConfidences: [0.9],
+        salientRegion: nil,
+        photoPixelSize: CGSize(width: 2400, height: 1600)
+    )
+    check(tinyFaceOnly == nil, "mustKeepRegion: tiny face discarded, no saliency -> nil")
+
+    // Low-confidence face (below 0.5) discarded even though it is otherwise
+    // large enough.
+    let lowConfidenceOnly = mustKeepRegion(
+        faces: [CGRect(x: 0.4, y: 0.2, width: 0.1, height: 0.15)],
+        faceConfidences: [0.3],
+        salientRegion: nil,
+        photoPixelSize: CGSize(width: 2400, height: 1600)
+    )
+    check(lowConfidenceOnly == nil, "mustKeepRegion: low-confidence face discarded, no saliency -> nil")
+}
+
+// =====================================================================
+// Phase 1 - mustKeepRegion: margin math (interior, then clamped at the
+// photo's own 0...1 edge).
+// =====================================================================
+do {
+    // Interior face: margin (25% of the face's own extent, 0.2*0.25=0.05
+    // each side) applies with no clamping.
+    let interiorFace = CGRect(x: 0.3, y: 0.3, width: 0.2, height: 0.2)
+    let region = mustKeepRegion(faces: [interiorFace], faceConfidences: [0.9], salientRegion: nil, photoPixelSize: CGSize(width: 2000, height: 2000))
+    check(region != nil, "mustKeepRegion: one surviving face -> non-nil")
+    if let region {
+        check(near(region.minX, 0.25, 1e-9), "mustKeepRegion: interior face - left edge = face.minX - margin")
+        check(near(region.minY, 0.25, 1e-9), "mustKeepRegion: interior face - top edge = face.minY - margin")
+        check(near(region.maxX, 0.55, 1e-9), "mustKeepRegion: interior face - right edge = face.maxX + margin")
+        check(near(region.maxY, 0.55, 1e-9), "mustKeepRegion: interior face - bottom edge = face.maxY + margin")
+    }
+
+    // Corner face: the same margin would push past the photo's 0...1
+    // bounds on two sides - those sides clamp at the edge instead.
+    let cornerFace = CGRect(x: 0.02, y: 0.02, width: 0.2, height: 0.2)
+    let cornerRegion = mustKeepRegion(faces: [cornerFace], faceConfidences: [0.9], salientRegion: nil, photoPixelSize: CGSize(width: 2000, height: 2000))
+    check(cornerRegion != nil, "mustKeepRegion: corner face -> non-nil")
+    if let cornerRegion {
+        check(near(cornerRegion.minX, 0.0, 1e-9), "mustKeepRegion: corner face - left margin clamped at the photo edge")
+        check(near(cornerRegion.minY, 0.0, 1e-9), "mustKeepRegion: corner face - top margin clamped at the photo edge")
+        check(near(cornerRegion.maxX, 0.27, 1e-9), "mustKeepRegion: corner face - right edge unaffected by clamping")
+        check(near(cornerRegion.maxY, 0.27, 1e-9), "mustKeepRegion: corner face - bottom edge unaffected by clamping")
+    }
+
+    // Two faces union first, THEN margin - not margin-then-union.
+    let faceA = CGRect(x: 0.1, y: 0.4, width: 0.1, height: 0.1)
+    let faceB = CGRect(x: 0.6, y: 0.4, width: 0.1, height: 0.1)
+    let twoFaceRegion = mustKeepRegion(faces: [faceA, faceB], faceConfidences: [0.9, 0.9], salientRegion: nil, photoPixelSize: CGSize(width: 2000, height: 2000))
+    check(twoFaceRegion != nil, "mustKeepRegion: two surviving faces -> non-nil")
+    if let twoFaceRegion {
+        // Union of [0.1,0.4,0.1,0.1] and [0.6,0.4,0.1,0.1] is x:0.1...0.7, y:0.4...0.5
+        // (width 0.6, height 0.1) - margin is 25% of THAT union's own extent
+        // (0.15 in x, 0.025 in y), not of either face individually. The left
+        // edge (0.1 - 0.15 = -0.05) falls outside the photo and clamps to 0.
+        check(near(twoFaceRegion.minX, 0.0, 1e-9), "mustKeepRegion: two faces - union-then-margin left edge clamped")
+        check(near(twoFaceRegion.maxX, 0.7 + 0.15, 1e-9), "mustKeepRegion: two faces - union-then-margin right edge")
+        check(near(twoFaceRegion.minY, 0.4 - 0.025, 1e-9), "mustKeepRegion: two faces - union-then-margin top edge")
+        check(near(twoFaceRegion.maxY, 0.5 + 0.025, 1e-9), "mustKeepRegion: two faces - union-then-margin bottom edge")
+    }
+}
+
+// =====================================================================
+// Phase 1 - framingCost: degenerate-input guards, ordering (a clipped
+// cell must always cost more than a safe one), and determinism.
+// =====================================================================
+do {
+    // Degenerate inputs return 0 rather than dividing by zero / crashing.
+    check(near(framingCost(mustKeep: .zero, photoPixelSize: CGSize(width: 2000, height: 2000), cellAspect: 1.0), 0, 1e-9),
+          "framingCost: zero-size mustKeep -> 0")
+    check(near(framingCost(mustKeep: CGRect(x: 0, y: 0, width: 0.2, height: 0.2), photoPixelSize: CGSize(width: 2000, height: 2000), cellAspect: 0), 0, 1e-9),
+          "framingCost: zero cellAspect -> 0")
+    check(near(framingCost(mustKeep: CGRect(x: 0, y: 0, width: 0.2, height: 0.2), photoPixelSize: .zero, cellAspect: 1.0), 0, 1e-9),
+          "framingCost: zero photoPixelSize -> 0")
+
+    // A tall, narrow must-keep region (a single portrait-oriented subject)
+    // fits safely in a narrow cell but gets clipped by a wide one.
+    let tallNarrow = CGRect(x: 0.4, y: 0.2, width: 0.15, height: 0.6)
+    let portraitPhoto = CGSize(width: 2000, height: 3000)
+    let safeCost = framingCost(mustKeep: tallNarrow, photoPixelSize: portraitPhoto, cellAspect: 0.5)
+    let clippedCost = framingCost(mustKeep: tallNarrow, photoPixelSize: portraitPhoto, cellAspect: 2.0)
+    check(safeCost < 3, "framingCost: tall/narrow subject in a narrow cell scores low (no clip)")
+    check(clippedCost > 10, "framingCost: tall/narrow subject in a wide cell scores high (clipped)")
+    check(safeCost < clippedCost, "framingCost: the safe cell beats the clipping one")
+
+    // Determinism: identical inputs, identical output, called twice.
+    let repeat1 = framingCost(mustKeep: tallNarrow, photoPixelSize: portraitPhoto, cellAspect: 2.0)
+    let repeat2 = framingCost(mustKeep: tallNarrow, photoPixelSize: portraitPhoto, cellAspect: 2.0)
+    check(repeat1 == repeat2, "framingCost: identical inputs -> identical output (determinism)")
+}
+
+// =====================================================================
+// Phase 1 - faceAwareAssignment: the search entry point. Covers a
+// clipped-vs-safe template pair, a group shot wanting a wider cell, a
+// no-faces landscape set matching today's choice, determinism, and the
+// degrade-to-today guarantee.
+// =====================================================================
+do {
+    // A single tall/narrow subject: sideBySide's narrow columns (cell
+    // aspect 0.5) keep it safe; stacked's wide rows (cell aspect 2.0) clip
+    // it. The better template (sideBySide, index 0) must win.
+    let subject = PhotoID()
+    let neutral = PhotoID()
+    let photos = [subject, neutral]
+    let photoSizes: [PhotoID: CGSize] = [
+        subject: CGSize(width: 2000, height: 3000),
+        neutral: CGSize(width: 2000, height: 2000)
+    ]
+    let mustKeepRegions: [PhotoID: CGRect] = [
+        subject: CGRect(x: 0.4, y: 0.2, width: 0.15, height: 0.6)
+    ]
+    let canvasSize = CGSize(width: 1000, height: 1000)
+
+    let result = faceAwareAssignment(photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions, canvasSize: canvasSize, border: .none)
+    check(result.templateIndex == 0, "faceAwareAssignment: clipped-vs-safe - the non-clipping template (sideBySide) wins")
+    check(leafList(result.template) == photos, "faceAwareAssignment: clipped-vs-safe - single valid 2-way permutation preserved")
+}
+
+do {
+    // A wide group shot (faces spread horizontally): stacked's wide rows
+    // (cell aspect 2.0) keep it safe; sideBySide's narrow columns (cell
+    // aspect 0.5) clip it. The better template (stacked, index 1) must win.
+    let group = PhotoID()
+    let neutral = PhotoID()
+    let photos = [group, neutral]
+    let photoSizes: [PhotoID: CGSize] = [
+        group: CGSize(width: 3000, height: 2000),
+        neutral: CGSize(width: 2000, height: 2000)
+    ]
+    let mustKeepRegions: [PhotoID: CGRect] = [
+        group: CGRect(x: 0.1, y: 0.4, width: 0.8, height: 0.2)
+    ]
+    let canvasSize = CGSize(width: 1000, height: 1000)
+
+    let result1 = faceAwareAssignment(photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions, canvasSize: canvasSize, border: .none)
+    check(result1.templateIndex == 1, "faceAwareAssignment: group shot - the wider template (stacked) wins")
+
+    // Determinism: same inputs, called again, identical (template index,
+    // resulting tree, AND cost) result.
+    let result2 = faceAwareAssignment(photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions, canvasSize: canvasSize, border: .none)
+    check(result1.templateIndex == result2.templateIndex, "faceAwareAssignment: determinism - templateIndex repeats")
+    check(result1.template == result2.template, "faceAwareAssignment: determinism - resulting tree repeats")
+    check(near(result1.cost, result2.cost, 1e-12), "faceAwareAssignment: determinism - cost repeats")
+}
+
+do {
+    // No must-keep region anywhere (a landscape set with no faces/saliency
+    // survivors) must match EXACTLY what today's app flow already produces:
+    // defaultTemplateIndex's orientation-based template, then
+    // contentFitAssignment's permutation on it. This is the "strict
+    // improvement, not a replacement" guarantee.
+    let p1 = PhotoID()
+    let p2 = PhotoID()
+    let photos = [p1, p2]
+    let photoSizes: [PhotoID: CGSize] = [
+        p1: CGSize(width: 1920, height: 1080), // 16:9 landscape
+        p2: CGSize(width: 1920, height: 1080)
+    ]
+    let canvasSize = CGSize(width: 1000, height: 1000)
+
+    let expectedTemplateIndex = defaultTemplateIndex(orientations: photos.map { photoSizes[$0]! })
+    let expectedTemplate = contentFitAssignment(
+        photoSizes: photoSizes,
+        template: templates(for: photos)[expectedTemplateIndex],
+        canvasSize: canvasSize,
+        border: .none
+    )
+
+    let result = faceAwareAssignment(photos: photos, photoSizes: photoSizes, mustKeepRegions: [:], canvasSize: canvasSize, border: .none)
+    check(result.templateIndex == expectedTemplateIndex, "faceAwareAssignment degrade: no-mustKeep landscape set picks the SAME template as today")
+    check(result.template == expectedTemplate, "faceAwareAssignment degrade: no-mustKeep landscape set picks the SAME assignment as today")
+}
+
+do {
+    // The degrade guarantee has to hold for ASYMMETRIC sets too, not just
+    // the symmetric one above - two identical photos agree by coincidence,
+    // because a symmetric set makes the orientation heuristic and the
+    // aspect-cost argmin land on the same template anyway. Measured
+    // 2026-07-28: before the explicit fallback guard in
+    // `faceAwareAssignment`, THESE cases silently disagreed (wide+square,
+    // 3-mixed and 4-mixed), which would have relaid out every faceless
+    // collage in the app. Each case below is a no-mustKeep set that must
+    // reproduce today's `defaultTemplateIndex` + `contentFitAssignment`
+    // result exactly.
+    let sets: [(String, [CGSize])] = [
+        ("wide + square", [CGSize(width: 1920, height: 1080), CGSize(width: 1500, height: 1500)]),
+        ("tall + wide", [CGSize(width: 1080, height: 1920), CGSize(width: 1920, height: 1080)]),
+        ("3 mixed", [CGSize(width: 1080, height: 1920), CGSize(width: 1920, height: 1080), CGSize(width: 1500, height: 1500)]),
+        ("4 mixed", [CGSize(width: 1080, height: 1920), CGSize(width: 1920, height: 1080), CGSize(width: 1500, height: 1500), CGSize(width: 1920, height: 1080)])
+    ]
+    let canvasSize = CGSize(width: 1000, height: 1000)
+    for (label, sizes) in sets {
+        let ids = sizes.map { _ in PhotoID() }
+        var photoSizes: [PhotoID: CGSize] = [:]
+        for (i, id) in ids.enumerated() { photoSizes[id] = sizes[i] }
+
+        let expectedIndex = defaultTemplateIndex(orientations: ids.map { photoSizes[$0]! })
+        let expectedTemplate = contentFitAssignment(
+            photoSizes: photoSizes,
+            template: templates(for: ids)[expectedIndex],
+            canvasSize: canvasSize,
+            border: .none
+        )
+        let result = faceAwareAssignment(photos: ids, photoSizes: photoSizes, mustKeepRegions: [:], canvasSize: canvasSize, border: .none)
+        check(result.templateIndex == expectedIndex, "faceAwareAssignment degrade (asymmetric): \(label) picks the SAME template as today")
+        check(result.template == expectedTemplate, "faceAwareAssignment degrade (asymmetric): \(label) picks the SAME assignment as today")
+    }
+}
+
+do {
+    // Edge case: a 4-photo set where only ONE photo has a must-keep region
+    // and the rest degrade to the aspect-only term, all in one search -
+    // exercises the mixed mustKeep/no-mustKeep path through a bigger
+    // template set (8 candidates instead of 2).
+    let faced = PhotoID()
+    let a = PhotoID()
+    let b = PhotoID()
+    let c = PhotoID()
+    let photos = [faced, a, b, c]
+    let photoSizes: [PhotoID: CGSize] = [
+        faced: CGSize(width: 2000, height: 2000),
+        a: CGSize(width: 2000, height: 2000),
+        b: CGSize(width: 2000, height: 2000),
+        c: CGSize(width: 2000, height: 2000)
+    ]
+    let mustKeepRegions: [PhotoID: CGRect] = [
+        faced: CGRect(x: 0.35, y: 0.1, width: 0.3, height: 0.8) // tall subject
+    ]
+    let canvasSize = CGSize(width: 1000, height: 1000)
+    let result = faceAwareAssignment(photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions, canvasSize: canvasSize, border: .none)
+    check(templates(for: photos).indices.contains(result.templateIndex), "faceAwareAssignment: 4-photo mixed set - templateIndex is a valid candidate index")
+    check(Set(leafList(result.template)) == Set(photos), "faceAwareAssignment: 4-photo mixed set - every photo still placed exactly once")
+    check(result.cost.isFinite, "faceAwareAssignment: 4-photo mixed set - cost is finite")
+}
+
+// =====================================================================
 // Summary
 // =====================================================================
 print("\(passed) passed, \(failed) failed")

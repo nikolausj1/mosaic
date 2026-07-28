@@ -18,7 +18,11 @@ struct AutoFrameInput {
 
 /// Half the visible extent of the photo at a given zoom, normalized to the
 /// photo's own 0...1 space (mirrors `clampedCenter`'s hx/hy derivation).
-private func halfVisible(zoom: Double, photoPixelSize: CGSize, cellSize: CGSize) -> (hx: Double, hy: Double) {
+/// Not private: `MagicLayout.swift`'s `framingCost` reuses this directly
+/// (passing a synthetic `cellSize` that carries only a target aspect - the
+/// math here depends solely on cellSize's width/height RATIO, never its
+/// absolute magnitude, so that's a legitimate reuse, not a coincidence).
+func halfVisible(zoom: Double, photoPixelSize: CGSize, cellSize: CGSize) -> (hx: Double, hy: Double) {
     let photoW = Double(photoPixelSize.width)
     let photoH = Double(photoPixelSize.height)
     guard photoW > 0, photoH > 0, cellSize.width > 0, cellSize.height > 0 else { return (0.5, 0.5) }
@@ -33,15 +37,18 @@ private func halfVisible(zoom: Double, photoPixelSize: CGSize, cellSize: CGSize)
 }
 
 /// Step 1: faces surviving both thresholds - height (in PIXEL terms, against
-/// the photo's SHORT edge) and confidence.
-private func thresholdedFaces(_ input: AutoFrameInput) -> [CGRect] {
-    let photoH = Double(input.photoPixelSize.height)
-    let shortEdge = min(Double(input.photoPixelSize.width), Double(input.photoPixelSize.height))
+/// the photo's SHORT edge) and confidence. Factored out of `AutoFrameInput`
+/// (not private) so `MagicLayout.swift`'s `mustKeepRegion` can reuse the
+/// EXACT same thresholds (confidence 0.5, 8% of the short edge) rather than
+/// inventing its own - see B32 Phase 1 in `Magic Layout Spec.md`.
+func thresholdedFaces(faces: [CGRect], faceConfidences: [Double], photoPixelSize: CGSize) -> [CGRect] {
+    let photoH = Double(photoPixelSize.height)
+    let shortEdge = min(Double(photoPixelSize.width), Double(photoPixelSize.height))
     let minPixelHeight = 0.08 * shortEdge
 
     var kept: [CGRect] = []
-    for (i, face) in input.faces.enumerated() {
-        let confidence = i < input.faceConfidences.count ? input.faceConfidences[i] : 0
+    for (i, face) in faces.enumerated() {
+        let confidence = i < faceConfidences.count ? faceConfidences[i] : 0
         guard confidence >= 0.5 else { continue }
         let facePixelHeight = Double(face.height) * photoH
         guard facePixelHeight >= minPixelHeight else { continue }
@@ -50,9 +57,12 @@ private func thresholdedFaces(_ input: AutoFrameInput) -> [CGRect] {
     return kept
 }
 
-/// Union of a non-empty array of normalized rects.
-private func unionRect(_ rects: [CGRect]) -> CGRect {
-    var result = rects[0]
+/// Union of a (possibly empty) array of normalized rects; `.zero` for an
+/// empty array. Not private: `MagicLayout.swift`'s `mustKeepRegion` reuses
+/// this for the same union-of-surviving-faces math `autoFrame` does below.
+func unionRect(_ rects: [CGRect]) -> CGRect {
+    guard let first = rects.first else { return .zero }
+    var result = first
     for r in rects.dropFirst() { result = result.union(r) }
     return result
 }
@@ -61,7 +71,7 @@ private func unionRect(_ rects: [CGRect]) -> CGRect {
 /// neither a surviving face nor a saliency box exists - callers should fall
 /// back to a center/fill crop in that case.
 func autoFrame(_ input: AutoFrameInput) -> ROI? {
-    let survivingFaces = thresholdedFaces(input)
+    let survivingFaces = thresholdedFaces(faces: input.faces, faceConfidences: input.faceConfidences, photoPixelSize: input.photoPixelSize)
 
     // Step 2: zoom from SALIENCY ONLY - never from faces.
     var zoomTarget = 1.0
