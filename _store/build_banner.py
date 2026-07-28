@@ -287,7 +287,7 @@ def main():
         y += int((asc + desc) * 1.08)
 
     y += 28
-    sub1 = "Four favorites. One frame."
+    sub1 = "Two to four photos. One frame."
     lw = draw.textlength(sub1, font=f_promise_sub)
     draw.text((p0 + PANEL_W / 2 - lw / 2, y), sub1, font=f_promise_sub, fill=(200, 205, 214, 255))
 
@@ -304,7 +304,7 @@ def main():
     # (source, headline, subhead, center_x, scale, text_panel)
     devices = [
         dict(src=SRC["selected"],
-             headline="Pick four.\nIt does the rest.",
+             headline="Pick 2 to 4.\nIt does the rest.",
              sub="Auto-framing on arrival, no fiddly cropping.",
              cx=panel_left(1) + PANEL_W * 0.62, scale=1.00,
              text_panel=1),
