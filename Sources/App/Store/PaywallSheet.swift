@@ -85,35 +85,13 @@ struct PaywallSheet: View {
         }
     }
 
-    private var purchaseButtonTitle: String {
-        guard let product = storeService.product else { return "Unlock" }
-        return "Unlock - \(product.displayPrice)"
-    }
+    private var purchaseButtonTitle: String { storeService.unlockButtonTitle }
 
-    /// A cheap pure-SwiftUI mock of the exported corner (skips a real image
-    /// asset per the brief - a gradient card is enough to show what the
-    /// purchase removes rather than just describing it).
+    /// The shared chip-plus-Lockup mock (Justin, 2026-07-28: factored into
+    /// `WatermarkMockView` so SettingsSheet's upsell card shows the exact
+    /// same visual, just smaller) at this sheet's original fixed 220pt size
+    /// - unchanged from before the extraction.
     private var watermarkMock: some View {
-        ZStack(alignment: .bottomTrailing) {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(LinearGradient(
-                    colors: [Color.mosaicAccent.opacity(0.35), Color.mosaicSurface],
-                    startPoint: .topLeading, endPoint: .bottomTrailing
-                ))
-                .frame(width: 220, height: 220)
-            // Mirrors WatermarkDecorator's chip-plus-lockup treatment so the
-            // paywall shows exactly what a purchase removes.
-            Image("Lockup")
-                .resizable()
-                .scaledToFit()
-                .frame(height: 12)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color(red: 11/255, green: 11/255, blue: 13/255).opacity(0.78))
-                )
-                .padding(10)
-        }
+        WatermarkMockView()
     }
 }

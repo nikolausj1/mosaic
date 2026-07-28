@@ -85,18 +85,18 @@ struct BorderTrayView: View {
     /// eyedropper, and "+" - fixed at 9*38 + 8*3 + 2*10 = 386pt, which just
     /// fits a 393pt screen.
     ///
-    /// Remembered eyedropper picks (Justin, 2026-07-27): up to 2 more
-    /// swatches (`state.recentSampledSwatches`, newest first) now insert
-    /// immediately before the eyedropper button, so the row can hold up to
-    /// 11 elements - which no longer fits at any reasonable tap-target size
-    /// (11*36 + 10*3 + 2*10 = 446pt, already over budget even at the 36pt
-    /// floor). Rather than shrink targets further or truncate the row,
-    /// `swatchRow` is now a horizontally scrollable `ScrollView` - the fixed
-    /// 7 swatches + up to 2 recent picks + eyedropper + "+" all keep their
-    /// existing 38pt tap targets (still >= the 36pt floor) and are simply
-    /// reachable by a short swipe when the recent picks push the row past
-    /// the screen edge; with 0-1 recent picks (the common case) everything
-    /// still fits with no scrolling needed at all.
+    /// Remembered eyedropper picks (Justin, 2026-07-27, cap raised 2 -> 4 on
+    /// 2026-07-28 - "build a small palette"): up to 4 more swatches
+    /// (`state.recentSampledSwatches`, newest first) now insert immediately
+    /// before the eyedropper button, so the row can hold up to 13 elements -
+    /// which no longer fits at any reasonable tap-target size. Rather than
+    /// shrink targets further or truncate the row, `swatchRow` is now a
+    /// horizontally scrollable `ScrollView` - the fixed 7 swatches + up to 4
+    /// recent picks + eyedropper + "+" all keep their existing 38pt tap
+    /// targets (still >= the 36pt floor) and are simply reachable by a short
+    /// swipe when the recent picks push the row past the screen edge; with
+    /// 0-1 recent picks (the common case) everything still fits with no
+    /// scrolling needed at all.
     private let swatchSpacing: CGFloat = 3
     private let swatchTapTarget: CGFloat = 38
     private let swatchDiameter: CGFloat = 30

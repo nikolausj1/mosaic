@@ -40,31 +40,10 @@ struct SettingsSheet: View {
         NavigationStack {
             List {
                 Section {
-                    Button {
-                        showPaywall = true
-                    } label: {
-                        HStack {
-                            Text("Remove Watermark")
-                                .foregroundStyle(.white)
-                            Spacer()
-                            if storeService.isUnlocked {
-                                Label("Removed", systemImage: "checkmark")
-                                    .labelStyle(.trailingIcon)
-                                    .foregroundStyle(.white.opacity(0.5))
-                            } else {
-                                Image(systemName: "chevron.right")
-                                    .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.3))
-                            }
-                        }
-                    }
-                    .disabled(storeService.isUnlocked)
-
-                    Button {
-                        Task { await storeService.restore() }
-                    } label: {
-                        Text("Restore Purchase")
-                            .foregroundStyle(Color.mosaicAccent)
+                    if storeService.isUnlocked {
+                        watermarkRemovedRow
+                    } else {
+                        watermarkUpsellCard
                     }
                 }
                 .listRowBackground(Color.mosaicSurface)
@@ -139,6 +118,13 @@ struct SettingsSheet: View {
         .sheet(isPresented: $showPaywall) {
             PaywallSheet(storeService: storeService)
         }
+        // Loads the product ahead of the paywall sheet (Justin, 2026-07-28)
+        // so `watermarkUpsellCard`'s button can show the real price - e.g.
+        // "Unlock - $2.99" - the instant this sheet appears, not just after
+        // the paywall itself has had a chance to load it. Harmless to call
+        // again here even though `StoreService.start()` already loads it at
+        // app launch: `loadProduct()` is a no-op once `product` is set.
+        .task { await storeService.loadProduct() }
     }
 
     private var appVersionString: String {
@@ -146,20 +132,65 @@ struct SettingsSheet: View {
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-"
         return "\(version) (\(build))"
     }
-}
 
-/// "Removed" + a checkmark, icon trailing the title - the reverse of
-/// SwiftUI's default Label layout, matching the row's leading-title/
-/// trailing-status convention used elsewhere (e.g. PickerView's album menu).
-private struct TrailingIconLabelStyle: LabelStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 4) {
-            configuration.title
-            configuration.icon
-        }
+    // MARK: - Watermark removal (Justin, 2026-07-28: upsell card replaces
+    // the old plain "Remove Watermark" row)
+
+    /// Already purchased: collapses to a quiet confirmation, never a sales
+    /// pitch to someone who's already paid.
+    private var watermarkRemovedRow: some View {
+        Label("Watermark removed", systemImage: "checkmark.circle.fill")
+            .foregroundStyle(.white.opacity(0.7))
     }
-}
 
-private extension LabelStyle where Self == TrailingIconLabelStyle {
-    static var trailingIcon: TrailingIconLabelStyle { TrailingIconLabelStyle() }
+    /// Not yet purchased: a small marketing card - the shared watermark mock
+    /// (see `WatermarkMockView`, the exact same visual PaywallSheet uses, so
+    /// the two purchase surfaces agree) alongside a headline and one
+    /// supporting line, then the price on the primary button and a quieter
+    /// Restore Purchase below it. The primary button opens the full
+    /// `PaywallSheet` - this card sells the idea, the sheet still owns the
+    /// actual purchase flow and its error handling, so there's only one
+    /// place that drives a StoreKit purchase. Restore Purchase calls
+    /// `storeService.restore()` directly instead (unchanged from before this
+    /// card existed) - it's a quick sync-and-check, not a sale, so it
+    /// doesn't need the sheet's ceremony.
+    private var watermarkUpsellCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 14) {
+                WatermarkMockView(size: 84, chipHeight: 8)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Save without the watermark")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                    Text("Every collage you save carries a small Mosaic mark in the corner. Remove it once, keep it forever - no subscription.")
+                        .font(.footnote)
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+            }
+
+            Button {
+                showPaywall = true
+            } label: {
+                Text(storeService.unlockButtonTitle)
+                    .fontWeight(.semibold)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .background(Color.mosaicAccent)
+            .foregroundStyle(Color.black)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .buttonStyle(.plain)
+
+            Button {
+                Task { await storeService.restore() }
+            } label: {
+                Text("Restore Purchase")
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.45))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 6)
+    }
 }

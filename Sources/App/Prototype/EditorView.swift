@@ -571,30 +571,36 @@ struct EditorView: View {
         // reshape. Magnitude is a JUDGMENT CALL (Justin can retune): the
         // dominant component (`bracketDY`) takes the canvas from its
         // starting ratio toward a taller/portrait shape (obvious against
-        // the default square canvas), while the small `bracketDX` keeps the
-        // drag genuinely diagonal rather than a pure vertical pull. ~16% is
-        // the dominant axis, within the brief's "~12-18% of canvas" range.
+        // the default square canvas), while `bracketDX` keeps the drag
+        // genuinely diagonal rather than a pure vertical pull.
         //
-        // Sign convention (Justin, 2026-07-27, verified against
-        // `applyBracketDelta`'s per-corner switch in GestureController.swift
-        // rather than assumed): `applyBracketDelta` computes
-        // `.bottomRight: newWidth += dx; newHeight += dy` but
-        // `.topRight: newWidth += dx; newHeight -= dy` - the height term
-        // flips sign between those two corners because a positive
-        // (rightward, downward) drag is "outward" at the bottom-right
-        // vertex but "inward" at the top-right one; genuinely outward there
-        // is rightward-and-UPWARD, i.e. negative dy. So `animateBracketDrag`
-        // is fed `dy: -bracketDY` below for the top-right leg (translation
-        // height negative) to reproduce the SAME "grow the canvas, dominant
-        // vertical, toward portrait" reshape the old bottom-right demo
-        // showed - NOT a naive reuse of the old positive dy, which against
-        // `.topRight`'s formula would instead shrink the canvas vertically
-        // (still a ratio change, just the wrong direction for what this
-        // demo means to teach). Confirmed on-device: the top-right bracket
-        // visibly glides up-and-right and the canvas measurably narrows
-        // toward portrait, then restores exactly on the drag-back leg.
+        // MUCH MORE AGGRESSIVE (Justin, 2026-07-28: "really allow the user
+        // to see that they can really change the entire shape of the
+        // composition" - the old ~16%/~6% pair read as a subtle nudge, not a
+        // reshape). Pushed the dominant axis to ~42% of the canvas short
+        // edge (within the new "~35-45%" range). `bracketDX` is UNCHANGED at
+        // 6%, not scaled up with it - verified empirically (not just
+        // computed) with a debug build that measured the canvas's on-screen
+        // bounds via the same blue bracket-corner pixel edge detection the
+        // ratio-slider work used: an early pass that scaled both axes up
+        // together (~14%/~42%) grew the canvas WIDER than the phone's own
+        // screen at peak, clipping the bracket corners off both edges - a
+        // glitchy overflow, not an impressive reshape. Keeping `bracketDX`
+        // at its original, screen-safe magnitude while only pushing the
+        // dominant `bracketDY` still reads as a genuinely diagonal drag (the
+        // corner visibly moves up-and-right, not straight up) while the
+        // canvas stays within the phone's own bounds throughout: measured
+        // peak bracket bbox ~392x820pt against a 402x874pt screen. From a
+        // starting ~1:1 square this peaks at a clearly recognizable tall-
+        // portrait shape - `applyBracketDelta`'s preset snap (its
+        // `abs(log ratio diff) < 0.035` tolerance) sits just outside this
+        // delta's resulting ratio, so it settles as a crisp freehand shape
+        // rather than locking to a named preset, which is fine - the point
+        // is the VISIBLE change, not landing on a preset. The 120pt floor in
+        // `applyBracketDelta` never engages here since this corner's "out"
+        // leg only ever GROWS both dimensions.
         let bracketDX = shortEdge * 0.06
-        let bracketDY = shortEdge * 0.16
+        let bracketDY = shortEdge * 0.42
 
         ghostDemoPhase = .center // fingertip fades in here, not on the bracket
         withAnimation(.easeInOut(duration: 0.25)) { ghostDemoVisible = true }
@@ -659,7 +665,10 @@ struct EditorView: View {
     @MainActor
     private func animateBracketDrag(corner: BracketCorner, canvasSize: CGSize, dx: CGFloat, dy: CGFloat, out: Bool) async {
         var info = BracketInfo(corner: corner, originalSize: canvasSize, snappedPresetIndex: nil)
-        await tickAnimation(duration: 1.1) { eased in
+        // Slowed slightly from the shared 1.1s (Justin, 2026-07-28): the
+        // bigger reshape below needs a bit more time on screen to read as a
+        // deliberate shape change rather than a snap.
+        await tickAnimation(duration: 1.35) { eased in
             let t = out ? eased : (1 - eased)
             let result = applyBracketDelta(&info, translation: CGSize(width: dx * t, height: dy * t))
             state.document.canvasRatio = result.ratio

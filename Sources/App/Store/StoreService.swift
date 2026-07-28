@@ -41,12 +41,35 @@ final class StoreService {
             }
         }
         await loadProduct()
+        #if DEBUG
+        // Debug-only verification hook (Justin, 2026-07-28): "-forceUnlocked"
+        // forces the unlocked state so the purchased-state UI (SettingsSheet's
+        // "Watermark removed" row, the save sheet's no-watermark path) can be
+        // screenshotted/verified without a real sandbox purchase - StoreKit
+        // Testing normally needs launching through Xcode's own scheme (which
+        // has `Mosaic.storekit` wired into its Run action), not a bare
+        // `simctl launch`. Returns before `reconcileEntitlement()` so the real
+        // (empty) entitlement check never overwrites the forced value.
+        if ProcessInfo.processInfo.arguments.contains("-forceUnlocked") {
+            setUnlocked(true)
+            return
+        }
+        #endif
         await reconcileEntitlement()
     }
 
     func loadProduct() async {
         guard product == nil else { return }
         product = try? await Product.products(for: [Self.productID]).first
+    }
+
+    /// "Unlock - $X.XX" (or a bare "Unlock" before the product has loaded
+    /// or if the store fetch failed) - shared between PaywallSheet's primary
+    /// button and SettingsSheet's watermark upsell card (Justin, 2026-07-28)
+    /// so the two purchase surfaces can never drift onto different copy.
+    var unlockButtonTitle: String {
+        guard let product else { return "Unlock" }
+        return "Unlock - \(product.displayPrice)"
     }
 
     /// Walks the CURRENT entitlement (not the transaction history) for the

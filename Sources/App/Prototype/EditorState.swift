@@ -505,19 +505,32 @@ final class EditorState {
 
     // MARK: - Recently-sampled swatches (Justin, 2026-07-27)
 
-    /// The eyedropper's own picks, newest first, capped at 2 - shown in the
-    /// swatch row alongside the fixed derived swatches so the user can
-    /// toggle back and forth (e.g. between a fresh pick and white) without
-    /// re-sampling. Session-only per the brief ("They live for the editor
-    /// session ... no persistence needed") - a plain instance property, not
-    /// backed by UserDefaults/DocumentStore, so it resets with a fresh
-    /// EditorState same as `recentSampledSwatches`'s sibling session state
-    /// elsewhere in this file.
+    /// The eyedropper's own picks, newest first, capped at 4 (Justin,
+    /// 2026-07-28: raised from 2 - "it should add another swatch... build a
+    /// small palette") - shown in the swatch row alongside the fixed derived
+    /// swatches so the user can toggle back and forth (e.g. between a fresh
+    /// pick and white) without re-sampling. Session-only per the brief
+    /// ("They live for the editor session ... no persistence needed") - a
+    /// plain instance property, not backed by UserDefaults/DocumentStore, so
+    /// it resets with a fresh EditorState same as `recentSampledSwatches`'s
+    /// sibling session state elsewhere in this file.
     private(set) var recentSampledSwatches: [RGBA] = []
+
+    /// Cap on `recentSampledSwatches` (Justin, 2026-07-28, was 2).
+    private static let recentSwatchCap = 4
 
     /// Fuzzy equality for swatch dedupe - mirrors BorderTrayView's own
     /// `colorsMatch` (alpha isn't compared; every border swatch is fully
-    /// opaque).
+    /// opaque). Deliberately TIGHT (Justin, 2026-07-28, re-verified against
+    /// the "second pick adds no swatch" bug report): 0.01 per channel is
+    /// ~2.5/255 levels - near-identical, not merely similar - so two
+    /// genuinely different picks (e.g. red shirt vs. navy jacket) never
+    /// collide here. The actual root cause of that bug turned out to be a
+    /// Y-flip in `pixelColor` (see its doc comment below), which was
+    /// steering unrelated taps into a narrow band of similar dull tones that
+    /// happened to dedupe against each other or the fixed black/white
+    /// swatches; this tolerance itself was already appropriately tight and
+    /// didn't need loosening OR tightening once that was fixed.
     private static func swatchesMatch(_ a: RGBA, _ b: RGBA) -> Bool {
         abs(a.r - b.r) < 0.01 && abs(a.g - b.g) < 0.01 && abs(a.b - b.b) < 0.01
     }
@@ -528,8 +541,8 @@ final class EditorState {
     /// row, so a pick that lands on one of them contributes nothing new. A
     /// pick that matches something ALREADY in the recent list is bumped to
     /// the front (removed, then reinserted) rather than duplicated, so the
-    /// row never shows two identical circles. Caps at 2 - the oldest falls
-    /// off the end.
+    /// row never shows two identical circles. Caps at `recentSwatchCap` -
+    /// the oldest falls off the end.
     private func rememberSampledSwatch(_ rgba: RGBA) {
         let fixed = [
             RGBA.white, RGBA(r: 0, g: 0, b: 0, a: 1),
@@ -539,7 +552,7 @@ final class EditorState {
         guard !fixed.contains(where: { Self.swatchesMatch($0, rgba) }) else { return }
         recentSampledSwatches.removeAll { Self.swatchesMatch($0, rgba) }
         recentSampledSwatches.insert(rgba, at: 0)
-        if recentSampledSwatches.count > 2 { recentSampledSwatches.removeLast() }
+        if recentSampledSwatches.count > Self.recentSwatchCap { recentSampledSwatches.removeLast() }
     }
 
     /// Reads one pixel from `image` at a normalized position via a 1x1
@@ -557,15 +570,41 @@ final class EditorState {
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
         ) else { return nil }
-        // The CGImage out of CollageRenderer's makeTopLeftContext already
-        // carries that context's top-left flip, so the usual bottom-left
-        // correction would double-flip (verified empirically in the
-        // 2026-07-26 review pass: tree taps sampled the road). Translating
-        // by the raw top-based y is what lands the tapped pixel on the
-        // context's single pixel.
+        // BUG FIX (Justin, 2026-07-28): "it works perfect the first time, but
+        // the second time it should add another swatch... it seems only to
+        // work for one color." Root-caused with an instrumented build that
+        // dumped `image` to disk next to the normalized point actually
+        // sampled: this destination `ctx` is a PLAIN CGBitmapContext (Quartz
+        // default bottom-left origin, Y-UP), and `CGContext.draw(_:in:)`
+        // always seats the SOURCE image's row 0 at the BOTTOM of the
+        // destination rect regardless of how that source image looks when
+        // displayed normally (the same quirk CollageRenderer's own `draw`
+        // works around with an explicit `scaleBy(x:1,y:-1)` before ITS
+        // `context.draw` call - see CollageRenderer.swift). The OLD code here
+        // offset by the raw TOP-based `yTop`, which - confirmed empirically,
+        // not merely reasoned about, by comparing a dumped composite against
+        // logged sample points - reads the pixel at the VERTICALLY MIRRORED
+        // row instead (tapping the red shirt in the bottom-right cell
+        // sampled a gray tone from the top-right cell's mirrored position,
+        // and vice versa). Every photo grid has a top half and bottom half
+        // that often share similar dull tones (pavement, shadow, sky), so
+        // this silently steered MOST taps toward a narrow, mutually-similar
+        // set of colors that easily re-deduped against each other or against
+        // the fixed black/white swatches - reading exactly as "the eyedropper
+        // only works once." The comment this replaces claimed the raw
+        // top-based offset was itself the fix for an earlier flip bug
+        // ("tree taps sampled the road") - that finding doesn't hold for
+        // THIS composite (`CollageRenderer.renderForSampling`/
+        // `makeTopLeftContext`), which needs the mirror correction below
+        // instead. Offsetting by the BOTTOM-relative row - `cg.height - 1 -
+        // yTop` - undoes that draw-time mirror so the sampled pixel matches
+        // the one visually under the fingertip. Re-verified on-device with
+        // three successive samples of clearly different colors (red shirt,
+        // yellow shorts, navy jacket) all landing correctly.
+        let yBottomRelative = cg.height - 1 - yTop
         ctx.draw(cg, in: CGRect(
             x: -CGFloat(x),
-            y: -CGFloat(yTop),
+            y: -CGFloat(yBottomRelative),
             width: CGFloat(cg.width),
             height: CGFloat(cg.height)
         ))
