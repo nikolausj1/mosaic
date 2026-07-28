@@ -2,7 +2,7 @@
 title: "Magic Layout - Build Spec"
 created: 2026-07-28
 modified: 2026-07-28
-version: 1.0
+version: 1.1
 author: Claude Fable 5 (claude-fable-5)
 tags:
 ---
@@ -117,6 +117,13 @@ The long pole, and it is judgment rather than engineering. Budget most of the ca
 - **Animation**: simulator screenshot sequences, the pattern used throughout this project. Launch with `-resetPersistence -autoPick 4`, capture at ~0.3s intervals in a background loop, and assert on measured geometry rather than eyeballing.
 - **Timing**: measure and report added wall-clock against today's spinner. It is a regression if the app feels slower.
 - **On device**: the animation must be judged on a phone, not the simulator.
+
+## Build log
+
+- **Phase 1 - DONE 2026-07-28.** `Sources/Engine/MagicLayout.swift`: `mustKeepRegion`, `framingCost`, `faceAwareAssignment`. Smoke test 174 -> 219. Review caught that the degrade guarantee did not actually hold: the search re-derived the template from aspect cost while today's flow uses `defaultTemplateIndex`'s orientation heuristic, and the two disagreed on half of a spread of faceless sets. Fixed with an explicit fallback guard plus asymmetric test cases (the original test used two identical photos, which agree by symmetry and could never have caught it). NOT yet wired into the App layer.
+- **Phase 0 - DONE 2026-07-28.** `Sources/App/MagicLayout/MagicLayoutOverlay.swift` plus plumbing. Verified on simulator with real taps.
+  - **Timing missed the budget: ~1.4s added, not 400ms.** The arrive and scan beats are free (they cover `loadForEditing` + Vision), but box reveal + assemble + settle can only run after the result exists. The spec's own beat budget (1900ms) only fits inside 400ms if the covered work takes >= 1.5s, and it does not. Levers: overlap the settle with the assemble tail (-250ms), shorten assemble to ~450ms (-250ms), stream Vision per photo so boxes light DURING the scan (-350ms). **Recommendation: ration instead of trimming - keep the full show for the first collage, cut hard for later ones - which is Phase 3's rationing brought forward.**
+  - **Finding: Vision is dead in the iOS Simulator** ("Failed to create espresso context"), and the error was previously swallowed and returned as "no faces". Every simulator run has been exercising the center-fill fallback, so all prior simulator-based judgement of B20 auto-framing was of the fallback, not the feature. A CPU-only retry (after the default throws only, never on device) fixes it. **This retroactively weakens any auto-framing conclusion drawn from a simulator before 2026-07-28.**
 
 ## Risks
 

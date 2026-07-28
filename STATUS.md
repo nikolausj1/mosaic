@@ -2,7 +2,7 @@
 title: "STATUS - Photo Collage"
 created: 2026-07-24
 modified: 2026-07-28
-version: 2.3
+version: 2.4
 author: Claude Fable 5 (claude-fable-5)
 tags:
 ---
@@ -41,6 +41,8 @@ Active Development (Phase 6 of 7 complete; Phase 7, visual polish, in progress)
       - unblocks: closing the picker performance report
 - [ ] **Judge the teach + eyedropper rework (2026-07-26 late night, deployed)**: first-run coach marks are GONE, replaced by a ghost gesture demo - a translucent fingertip drags the corner and then a seam on the user's own collage, live, then restores it exactly (tap skips; Dev sheet replay still works); the border eyedropper now has a proper magnifier loupe - touch and drag on the collage, a mag circle with crosshair and live color ring follows, release to apply (~5 min)
       - unblocks: closing the first-run teaching design and B11 for good
+- [ ] **Judge B32 Magic Layout Phases 0 + 1 (built 2026-07-28, NOT yet on your phone)** - the picker-to-editor cut is now a sequence: chosen photos stay lit in place while the rest dims, real face boxes light up, then they fly and morph into their cells. Phase 1's face-aware layout decision is built and tested in the Engine but not yet wired to the animation. **Two decisions waiting on you: the added wall clock is ~1.4s, not the spec's 400ms budget (see Ship Plan / my recommendation: keep the full show for the first collage only and cut later ones), and whether to wire Phase 1 in now or after you have felt Phase 0 on device.**
+      - unblocks: Phase 2 (divider search) and Phase 3 (rationing + re-run affordance)
 - [ ] **Judge the tap-bug fix + bracket demo (2026-07-27, deployed)**: the wrong-photo-selected bug is ROOT-CAUSED and fixed - the collapsing hero header sat above the grid's ScrollView, so collapsing it shrank the layout ~72pt and slid the grid under your finger mid-tap (intermittent because it only bit while the hero was collapsing near the top). The hero is now a fixed-height brand moment, no collapse; verified with a 48-photo numbered test library, four consecutive select/deselect operations all landing exactly, including immediately after a scroll. Also: the inactive CTA is now truly opaque (SwiftUI's .disabled() was dimming the whole button, including the opaque fill); and the ghost demo now drags a CANVAS CORNER BRACKET to reshape the aspect ratio freehand instead of the interior middle point (~10 min)
       - unblocks: closing the selection-bug report for good; if you still want the hero to shrink on scroll, it has to move INSIDE the scroll view as content - say the word
 - [x] **DONE 2026-07-28: Apple developer/commercial setup verified and app record created.** Paid Apps Agreement, banking, W-9 and EU trader status all Active; App Store Connect record live as "Mosaic: Photo Collage & Layout" (Apple ID 6795437010, bundle com.levelup.mosaic). The name was available and is now reserved.
