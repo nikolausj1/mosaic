@@ -58,7 +58,7 @@ THE DETAILS
 - Square, portrait, story, and landscape canvas ratios, plus your photo's own ratio
 - Border thickness, corner rounding, and color, including colors sampled from your photos
 - Rotate, flip, replace, and swap photos in place
-- Your last collage is always one tap from re-editing
+- Pinch the photo grid to size the thumbnails, the way Photos does
 
 Mosaic is free with a small watermark on saved collages. One inexpensive one-time purchase removes it forever. No subscription.
 
