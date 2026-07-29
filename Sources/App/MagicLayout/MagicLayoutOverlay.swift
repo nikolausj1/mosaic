@@ -522,9 +522,21 @@ final class MagicLayoutController {
         }
         guard !Task.isCancelled else { return }
 
+        // `documentReady` just ran `rebuildPlans()` synchronously, almost
+        // certainly before the canvas rect existed (see the comment there) -
+        // so `glowsEnabled` cannot yet reflect a real decision. Wait,
+        // briefly and capped, for the resolved rebuild `canvasFrameChanged`
+        // triggers before reading `glowsEnabled` below. A glow that starts
+        // ~30ms later (the measured real-world gap) is far better than one
+        // that has to retract.
+        await waitForResolvedPlans(cap: 0.25)
+        guard !Task.isCancelled else { return }
+
         // Real glows on real detections, staggered so they read as "found,
         // then found, then found" rather than appearing as one block. Skipped
-        // wholesale when detection is weak (never advertise a miss).
+        // wholesale when detection is weak (never advertise a miss) - or when
+        // destinations never resolved at all, in which case `glowsEnabled`
+        // is still sitting at its safe `begin()` default, `false`.
         if glowsEnabled {
             withAnimation(.easeOut(duration: Self.scaled(0.22))) { glowStrength = 1 }
             let stagger = min(0.09, Self.scanCap / Double(max(photos.count, 1)) / 2)
@@ -542,15 +554,12 @@ final class MagicLayoutController {
         }
         guard !Task.isCancelled else { return }
 
-        // The editor mounted during the scan; give its canvas rect a couple
-        // of frames to arrive if it somehow hasn't (capped - a missing rect
-        // falls back to the source rect, i.e. no morph, rather than hanging).
-        var waited = 0.0
-        while canvasRect == .zero && waited < 0.25 && !Task.isCancelled {
-            await sleep(0.016)
-            waited += 0.016
-        }
-        rebuildPlans()
+        // Almost always a no-op by now (the wait above already resolved it) -
+        // kept as the backstop for the rare case where the canvas genuinely
+        // took longer than that first cap: destRect must be correct before
+        // ASSEMBLE needs it (capped - a still-missing rect falls back to the
+        // source rect, i.e. no morph, rather than hanging).
+        await waitForResolvedPlans(cap: 0.25)
         guard !Task.isCancelled else { return }
 
         // BEAT 3 - DECIDE. The whole reason the feature exists: this is the
@@ -641,6 +650,33 @@ final class MagicLayoutController {
 
     // MARK: - Plan resolution
 
+    /// Waits, briefly and capped, for the editor's canvas rect to publish,
+    /// then runs `rebuildPlans()` regardless of whether it did - so a plan
+    /// build always reflects the best information available and this can
+    /// never hang the sequence. Shared by the two points in `run()` that
+    /// must not read `glowsEnabled` (or `destRect`) from a stale, unresolved
+    /// build: right before the scan beat's glow decision, and again right
+    /// before ASSEMBLE needs real destination geometry.
+    private func waitForResolvedPlans(cap: Double) async {
+        var waited = 0.0
+        while !canvasRectResolved && waited < cap && !Task.isCancelled {
+            await sleep(0.016)
+            waited += 0.016
+        }
+        rebuildPlans()
+    }
+
+    /// The single predicate for "the editor has published a REAL canvas
+    /// rect". `waitForResolvedPlans` and `rebuildPlans` must agree on it
+    /// exactly. They did not at first: the wait exited on `canvasRect ==
+    /// .zero` while the glow gate asked for a non-zero SIZE, so a rect that
+    /// arrived with a real origin but no size yet - reachable mid-layout -
+    /// would end the wait without satisfying the gate, and the glow beat
+    /// would be skipped for the whole sequence rather than merely delayed.
+    private var canvasRectResolved: Bool {
+        canvasRect.width > 0 && canvasRect.height > 0
+    }
+
     /// Pairs each finished photo with the picker thumbnail it came from and
     /// resolves its destination cell. Idempotent - re-run whenever a new
     /// input (document, canvas rect) lands.
@@ -715,12 +751,42 @@ final class MagicLayoutController {
         }
 
         photos = plans
-        glowsEnabled = Self.shouldRevealGlows(plans)
+
+        // Glows may only be switched ON by a build whose destinations are
+        // REAL (2026-07-28, closing the gap the verification sweep flagged
+        // rather than just recording it): a build that runs before the
+        // canvas rect has published skips the clip filter above (`??
+        // detected`), so `shouldRevealGlows` would be judging faces that
+        // were never checked against the real crop. Confirmed reachable on
+        // a normal pick, not just theoretical: `documentReady` calls this
+        // synchronously the instant the document lands, which is BEFORE
+        // SwiftUI has had a render pass to let `CanvasView` publish
+        // `canvasRect` - measured at ~30ms after on a real run. The very
+        // next build, once `canvasFrameChanged` delivers the rect, is
+        // authoritative and safe to read.
+        //
+        // Leaving `glowsEnabled` UNTOUCHED here (rather than assigning it
+        // `false`) is deliberate, not an oversight: it is what keeps this
+        // monotonic (false -> true, never back). A true -> false flip here
+        // would be worse than it sounds, because `run()`'s scan beat reads
+        // `glowsEnabled` once to decide whether to run the staggered reveal
+        // AT ALL - if that read landed on `false` transiently, the reveal
+        // would be skipped for the rest of the sequence (nothing re-triggers
+        // it), silently killing the beat rather than just re-hiding a wrong
+        // glow. `run()` pairs with this by waiting (briefly, capped, never
+        // hanging) for a resolved build before it reads `glowsEnabled` -
+        // see `waitForResolvedPlans`.
+        let destinationsResolved = canvasRectResolved
+        if destinationsResolved {
+            glowsEnabled = Self.shouldRevealGlows(plans)
+        }
         #if DEBUG
-        NSLog("MAGIC plans: %d photos, glowedFaces=%@, clippedFacesDropped=%d, glows=%@, canvas=%@",
+        NSLog("MAGIC plans: %d photos, glowedFaces=%@, clippedFacesDropped=%d, glows=%@, resolved=%@, canvas=%@",
               plans.count, plans.map { "\($0.faces.count)" }.joined(separator: ","),
               clippedFaceCount,
-              glowsEnabled ? "on" : "off (degraded)", NSCoder.string(for: canvasRect))
+              glowsEnabled ? "on" : "off (degraded)",
+              destinationsResolved ? "yes" : "no",
+              NSCoder.string(for: canvasRect))
         #endif
     }
 

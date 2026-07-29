@@ -292,6 +292,7 @@ final class EditorState {
         doc = reclampAll(doc, canvasSize: fitted)
         document = doc
         pushUndo(old)
+        commitCanvasRatioChoice()
     }
 
     /// JUDGMENT CALL: "Original" (the ratio tray's 7th chip) is defined as
@@ -395,6 +396,45 @@ final class EditorState {
     func commitBorderThicknessChoice() {
         hasCustomizedBorderThickness = true
         UserDefaults.standard.set(document.border.inner, forKey: Self.lastBorderThicknessDefaultsKey)
+    }
+
+    // MARK: - Sticky canvas ratio (B32 Phase 5)
+
+    /// Stored as two keys rather than one encoded string so that a partially
+    /// written pair can be detected and ignored, and so the values stay
+    /// readable in a defaults dump. Same suite and the same direct-UserDefaults
+    /// approach as `lastBorderThicknessDefaultsKey` above, for the same
+    /// `@Observable`-macro reason documented there.
+    static let lastCanvasRatioWidthDefaultsKey = "lastCanvasRatioWidth"
+    static let lastCanvasRatioHeightDefaultsKey = "lastCanvasRatioHeight"
+
+    /// The user's last DELIBERATELY chosen canvas ratio, or nil if they have
+    /// never set one by hand.
+    ///
+    /// Phase 5 lets the photos choose the canvas shape, but only where the
+    /// user has expressed no preference: once they have set a ratio
+    /// themselves that is stated intent, and the app stops guessing - exactly
+    /// how border thickness already behaves. `object(forKey:)` rather than
+    /// `double(forKey:)` for the same reason as the border: the latter
+    /// returns 0 for an absent key, which is indistinguishable from a stored
+    /// value and would silently look like a preference nobody set.
+    static var rememberedCanvasRatio: Ratio? {
+        guard
+            let w = UserDefaults.standard.object(forKey: lastCanvasRatioWidthDefaultsKey) as? Double,
+            let h = UserDefaults.standard.object(forKey: lastCanvasRatioHeightDefaultsKey) as? Double,
+            w > 0, h > 0
+        else { return nil }
+        return Ratio(width: w, height: h)
+    }
+
+    /// Called from the two places a ratio can be set BY HAND - a tray chip
+    /// tap (`setCanvasRatio`) and the end of a corner-bracket drag
+    /// (`endBracket`). Deliberately NOT called when the app chooses a ratio
+    /// itself at pick time, which would turn one auto-choice into a
+    /// permanent preference and stop the feature ever running again.
+    func commitCanvasRatioChoice() {
+        UserDefaults.standard.set(document.canvasRatio.width, forKey: Self.lastCanvasRatioWidthDefaultsKey)
+        UserDefaults.standard.set(document.canvasRatio.height, forKey: Self.lastCanvasRatioHeightDefaultsKey)
     }
 
     /// B11 canvas eyedropper (Justin, 2026-07-26): true while the Border

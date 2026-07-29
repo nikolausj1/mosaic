@@ -433,7 +433,13 @@ final class PickerState {
         // `contentFitAssignment` answer (see the degrade guard in
         // `faceAwareAssignment`, and the "face-aware degrade" smoke-test
         // case). A second guard here could only ever disagree with it.
-        let decision = faceAwareAssignment(
+        // Phase 5: the canvas RATIO is part of the decision now, not a
+        // hardcoded square. `chooseCanvasAndLayout` wraps the same
+        // `faceAwareAssignment` search - it nominates at most ONE challenger
+        // ratio from photo orientations, runs the search at both that and
+        // square, and keeps the challenger only if it wins by a clear margin.
+        // A user who has ever set a ratio by hand short-circuits all of it.
+        let decision = chooseCanvasAndLayout(
             photos: idsInOrder,
             photoSizes: pixelSizes,
             // `-faceAwareLayoutOff` (DEBUG, same family as `-magicLayoutOff`):
@@ -445,10 +451,17 @@ final class PickerState {
             // the tool Phase 4 will want when a real-camera-roll layout looks
             // wrong and the question is whether the faces caused it.
             mustKeepRegions: Self.isFaceAwareLayoutDisabled ? [:] : mustKeepRegions,
-            canvasSize: nominalCanvas,
-            border: border
+            border: border,
+            // Stated intent wins over the content rule. Nil until the user
+            // has set a ratio by hand at least once.
+            userRatio: EditorState.rememberedCanvasRatio
         )
         let assigned = decision.template
+        // Everything downstream - solving for cells, auto-framing into them,
+        // and the final reclamp - must use the canvas the decision actually
+        // chose. Solving the chosen template against the old fixed square
+        // would auto-frame every photo against cell shapes that never exist.
+        let decidedCanvas = nominalCanvasSize(for: decision.canvasRatio, shortEdge: 1000)
 
         #if DEBUG
         // Before/after instrumentation (verification only): what today's
@@ -467,22 +480,26 @@ final class PickerState {
         let orderIndex = Dictionary(uniqueKeysWithValues: idsInOrder.enumerated().map { ($0.element, $0.offset) })
         let previousOrder = photoIDs(in: previousAssigned).map { orderIndex[$0].map(String.init) ?? "?" }.joined(separator: ",")
         let newOrder = photoIDs(in: assigned).map { orderIndex[$0].map(String.init) ?? "?" }.joined(separator: ",")
-        NSLog("MAGIC decision: template %d->%d perm [%@]->[%@] cost=%.3f mustKeep=%d/%d CHANGED=%@",
+        NSLog("MAGIC decision: template %d->%d perm [%@]->[%@] ratio %.3f (%@) cost=%.3f mustKeep=%d/%d CHANGED=%@",
               previousIndex, decision.templateIndex, previousOrder, newOrder,
+              decision.canvasRatio.value,
+              EditorState.rememberedCanvasRatio != nil ? "sticky" :
+                  (decision.canvasRatio == .square ? "square" : "chosen"),
               decision.cost, mustKeepRegions.count, idsInOrder.count,
-              (previousIndex != decision.templateIndex || previousOrder != newOrder) ? "YES" : "no")
+              (previousIndex != decision.templateIndex || previousOrder != newOrder
+                  || decision.canvasRatio != .square) ? "YES" : "no")
         #endif
 
         // ---- PASS 3: FRAME. ----------------------------------------------
         // Unchanged B20 auto-framing, now solving against the cells the
         // face-aware decision produced.
-        let (cells, _) = solve(root: assigned, canvasSize: nominalCanvas, border: border)
+        let (cells, _) = solve(root: assigned, canvasSize: decidedCanvas, border: border)
         let cellRectByID = Dictionary(uniqueKeysWithValues: cells.map { ($0.id, $0.rect) })
 
         var photos: [PhotoID: PhotoRef] = [:]
         for id in idsInOrder {
             guard let pixelSize = pixelSizes[id] else { continue }
-            let cellRect = cellRectByID[id] ?? CGRect(origin: .zero, size: nominalCanvas)
+            let cellRect = cellRectByID[id] ?? CGRect(origin: .zero, size: decidedCanvas)
 
             var roi: ROI?
             if let vision = visionByID[id] {
@@ -510,8 +527,8 @@ final class PickerState {
             )
         }
 
-        var doc = Document(canvasRatio: .square, root: assigned, photos: photos, border: border)
-        doc = reclampAll(doc, canvasSize: nominalCanvas)
+        var doc = Document(canvasRatio: decision.canvasRatio, root: assigned, photos: photos, border: border)
+        doc = reclampAll(doc, canvasSize: decidedCanvas)
         return PickCompletion(
             document: doc,
             images: images,

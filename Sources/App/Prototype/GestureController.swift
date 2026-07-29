@@ -959,6 +959,10 @@ final class GestureController {
         }
         state.document = reclampAll(state.document, canvasSize: fitted)
         state.commitGesture()
+        // Dragging a bracket is as deliberate a ratio choice as tapping a
+        // tray chip, so it stops the auto-choice the same way - see
+        // `commitCanvasRatioChoice`.
+        state.commitCanvasRatioChoice()
     }
 
     // MARK: - Swap
