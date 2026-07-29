@@ -2,7 +2,7 @@
 title: "Magic Layout - Build Spec"
 created: 2026-07-28
 modified: 2026-07-28
-version: 1.4
+version: 1.5
 author: Claude Opus 5 (claude-opus-5)
 tags:
 ---
@@ -125,6 +125,23 @@ This also redeems the "start from a boring template" instinct honestly: the auth
 Watch for: **imperceptible deltas** (a divider moving 0.50 -> 0.55 may not read; an overshoot-and-settle easing keeps small moves legible without claiming anything false, below which it is better to skip the emphasis than manufacture drama), and the **no-adjustment case** (faceless sets take the degrade path and nothing moves - correct, and it makes motion mean something: movement signals the app found something, stillness signals it did not).
 
 **Open, pending the device pass:** whether the existing ghost gesture demo is still needed at all. The divider capsules and corner brackets are now always visible, and the reveal already puts the eye on the layout, so the grammar may teach itself - which was the PRD's original position. Until Phase 5 lands the brackets can only glow (no decision sits behind them, so moving them would be faking); after it, they can perform.
+
+**Rationing - the design, settled 2026-07-28 after the wall clock was measured.**
+
+The measurement (~1.01s bypassed, ~2.68s with the sequence) splits the beats into two kinds, and that split is the whole rule:
+
+> **Beats that COVER REAL WORK run at work-speed and cost nothing. Beats that run AFTER the result already exists are the only ones worth rationing.**
+
+Arrive and scan sit on top of `loadForEditing` plus Vision plus the decision - roughly a second that the app would spend behind a spinner anyway. They are free, and cutting them buys nothing while making the app look like it is doing less. Everything after the decision - the flare, the assemble tail, the settle dwell - is pure addition, and it is where the whole +1.66s lives.
+
+So rationing is two independent dials, not one:
+
+1. **Always:** post-result beats are capped by how long the covered work actually took. If Vision came back fast, the show is short - never hold purely for show when the result is ready. This is the spec's original rule, finally made measurable.
+2. **First collage vs later:** the first-ever collage gets the generous post-result timing (the wow is worth 1.6s exactly once). Later collages get the minimum that still reads as motion. Target for the common case: **total under ~1.4s, i.e. +400ms over the bypass path** - which is the original Phase 0 budget, met where it actually matters.
+
+Settings gets one control with three states: **Always / First time only / Off**. Reduce Motion continues to force Off regardless.
+
+Rejected: trimming the choreography uniformly. It would make the first impression worse to fix a problem that only exists on the fourth collage.
 
 ### Phase 5 - Canvas ratio joins the decision (and gives the brackets something true to perform)
 
