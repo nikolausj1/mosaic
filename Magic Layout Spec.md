@@ -2,7 +2,7 @@
 title: "Magic Layout - Build Spec"
 created: 2026-07-28
 modified: 2026-07-28
-version: 1.5
+version: 1.6
 author: Claude Opus 5 (claude-opus-5)
 tags:
 ---
@@ -185,6 +185,20 @@ The long pole, and it is judgment rather than engineering. Budget most of the ca
 - **Phase 0 - DONE 2026-07-28.** `Sources/App/MagicLayout/MagicLayoutOverlay.swift` plus plumbing. Verified on simulator with real taps.
   - **Timing missed the budget: ~1.4s added, not 400ms.** The arrive and scan beats are free (they cover `loadForEditing` + Vision), but box reveal + assemble + settle can only run after the result exists. The spec's own beat budget (1900ms) only fits inside 400ms if the covered work takes >= 1.5s, and it does not. Levers: overlap the settle with the assemble tail (-250ms), shorten assemble to ~450ms (-250ms), stream Vision per photo so boxes light DURING the scan (-350ms). **Recommendation: ration instead of trimming - keep the full show for the first collage, cut hard for later ones - which is Phase 3's rationing brought forward.**
   - **Finding: Vision is dead in the iOS Simulator** ("Failed to create espresso context"), and the error was previously swallowed and returned as "no faces". Every simulator run has been exercising the center-fill fallback, so all prior simulator-based judgement of B20 auto-framing was of the fallback, not the feature. A CPU-only retry (after the default throws only, never on device) fixes it. **This retroactively weakens any auto-framing conclusion drawn from a simulator before 2026-07-28.**
+
+- **Phase 5 (Engine) - DONE 2026-07-28.** `Sources/Engine/CanvasRatio.swift` (canonical 9-preset list, orientation-only nomination rule, override threshold, `nominalCanvasSize`) plus `chooseCanvasAndLayout` in `MagicLayout.swift`. Smoke test 238 -> 272. Timing: ~14ms worst case (challenger nominated, two searches), ~7ms common case (mixed orientation, no challenger) against a 60ms budget. A full nine-preset sweep would have been ~65-130ms, which is why only one challenger is nominated.
+  - **Degrade guarantee independently re-proven by the lead**, not merely by the worker's own test: 3276 asymmetric faceless sets across three border configurations, every one byte-identical to the legacy `defaultTemplateIndex` + `contentFitAssignment` path. That included 36 all-portrait faceless sets - the precise case an orientation-only rule could have wrongly challenged, and the reason the worker added a face-aware guard ahead of nomination.
+  - **The short-edge sizing convention is load-bearing, not arbitrary.** Border is stored as a fraction of the canvas short edge, so holding the short edge fixed at 1000 keeps the border identical in absolute terms across both candidate canvases. Matching area or diagonal instead would have skewed the cost comparison by border geometry alone.
+
+### Judgement calls settled by the lead (workers were instructed to report, not decide)
+
+| Call | Decision |
+|---|---|
+| Escalate to 9:16 / 16:9 on a stronger signal? | **Deferred.** "Start crude" is explicit in the spec, and 9:16 is a hard destination claim (a Story), not merely a shape. 4:5 and 5:4 only, revisited in Phase 4 with real photos |
+| A photo with `width == height` counts as which orientation? | **Neither** - so "3 portraits + 1 square" nominates no challenger. Correct conservative reading |
+| Reconcile the two disagreeing App preset lists? | **Partially.** `GestureController`'s flat 9 is an exact match for the canonical list and should source from it. `RatioTrayView`'s 6 chips are the unflipped half presented through a deliberate flip-in-place UX - leave that alone. Unifying the decision data is worth doing; restructuring a working UI to match is not |
+| `PhotoStore.swift:102` also hardcodes square | **Out of scope.** It is a bundled-sample fixture generator with no Vision data at all |
+| Sticky ratio preference storage | **Needs building** - no persisted "preferred ratio" exists yet. Model it on how border thickness already persists across new collages |
 
 ## Current state (2026-07-28, end of day)
 
