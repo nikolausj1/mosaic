@@ -81,7 +81,23 @@ struct SummaryRow {
     var changed: Bool
 }
 
+/// One row per PHOTO (not per set) - `summary.csv` only ever reported
+/// faces_kept as a SET total, which can't tell a 6-person group photo with
+/// a small cell apart from a 1-person selfie with a big one in the same
+/// set. Added alongside (not replacing) `summary.csv` to judge the
+/// group-photo-cell-size rule (B32 follow-up) against real photos: does the
+/// photo with MORE (smaller) faces actually end up with MORE cell area.
+struct PerPhotoRow {
+    var setName: String
+    var fileName: String
+    var faceCount: Int
+    var smallestFaceHeightFraction: Double?
+    var defaultCellAreaFraction: Double
+    var faceAwareCellAreaFraction: Double
+}
+
 var summaryRows: [SummaryRow] = []
+var perPhotoRows: [PerPhotoRow] = []
 
 for (setIndex, files) in sets.enumerated() {
     let setName = "set\(String(format: "%02d", setIndex + 1))"
@@ -91,6 +107,12 @@ for (setIndex, files) in sets.enumerated() {
     var photosByID: [PhotoID: PhotoData] = [:]
     var pixelSizes: [PhotoID: CGSize] = [:]
     var mustKeepRegions: [PhotoID: CGRect] = [:]
+    // Group-photo-cell-size signal (see MagicLayout.swift's
+    // `smallestSurvivingFaceHeight`) - per photo, computed from the SAME
+    // surviving-faces list `kept` below already is, so this costs nothing
+    // extra to gather here.
+    var mustKeepFaceHeights: [PhotoID: Double] = [:]
+    var fileNameByID: [PhotoID: String] = [:]
     var rawFaceCount = 0
     var keptFaceCount = 0
     var loadFailures: [String] = []
@@ -108,10 +130,14 @@ for (setIndex, files) in sets.enumerated() {
 
         order.append(id)
         pixelSizes[id] = pixelSize
+        fileNameByID[id] = url.lastPathComponent
         photosByID[id] = PhotoData(id: id, cgImage: cgImage, pixelSize: pixelSize, vision: vision, survivingFaces: kept)
 
         if let region = mustKeepRegion(faces: vision.faces.map(\.0), faceConfidences: vision.faces.map(\.1), salientRegion: vision.salient, photoPixelSize: pixelSize) {
             mustKeepRegions[id] = region
+        }
+        if let smallest = smallestSurvivingFaceHeight(faces: vision.faces.map(\.0), faceConfidences: vision.faces.map(\.1), photoPixelSize: pixelSize) {
+            mustKeepFaceHeights[id] = smallest
         }
     }
 
@@ -128,6 +154,7 @@ for (setIndex, files) in sets.enumerated() {
         photos: order,
         photoSizes: pixelSizes,
         mustKeepRegions: mustKeepRegions,
+        mustKeepFaceHeights: mustKeepFaceHeights,
         canvasSize: nominalCanvas,
         border: border
     )
@@ -165,6 +192,27 @@ for (setIndex, files) in sets.enumerated() {
     )
     let clippedDefault = panelResults.first?.clippedFaceCount ?? 0
     let clippedFaceAware = panelResults.count > 1 ? panelResults[1].clippedFaceCount : 0
+
+    // Per-photo cell AREA (fraction of the full canvas) in both variants -
+    // solved once more at `nominalCanvas` (proportions are scale-invariant,
+    // same reasoning `renderComparisonSheet`'s own doc comment already
+    // relies on, so this doesn't need to match the render's own 900pt panel
+    // canvas to be a faithful fraction).
+    let canvasArea = Double(nominalCanvas.width) * Double(nominalCanvas.height)
+    let (defaultCells, _) = solve(root: previousAssigned, canvasSize: nominalCanvas, border: border)
+    let (faceAwareCells, _) = solve(root: decision.template, canvasSize: nominalCanvas, border: border)
+    let defaultAreaByID = Dictionary(uniqueKeysWithValues: defaultCells.map { ($0.id, Double($0.rect.width) * Double($0.rect.height) / canvasArea) })
+    let faceAwareAreaByID = Dictionary(uniqueKeysWithValues: faceAwareCells.map { ($0.id, Double($0.rect.width) * Double($0.rect.height) / canvasArea) })
+    for id in order {
+        perPhotoRows.append(PerPhotoRow(
+            setName: setName,
+            fileName: fileNameByID[id] ?? "?",
+            faceCount: photosByID[id]?.survivingFaces.count ?? 0,
+            smallestFaceHeightFraction: mustKeepFaceHeights[id],
+            defaultCellAreaFraction: defaultAreaByID[id] ?? 0,
+            faceAwareCellAreaFraction: faceAwareAreaByID[id] ?? 0
+        ))
+    }
 
     summaryRows.append(SummaryRow(
         setName: setName,
@@ -208,4 +256,22 @@ for row in summaryRows {
 let summaryURL = URL(fileURLWithPath: outputDirPath).appendingPathComponent("summary.csv")
 try? csv.write(to: summaryURL, atomically: true, encoding: .utf8)
 
-print("LayoutLab: wrote \(summaryRows.count) sheet(s) + summary.csv to \(outputDirPath)")
+// ---- per_photo.csv --------------------------------------------------------
+// See `PerPhotoRow`'s own doc comment for why this exists alongside (not
+// instead of) summary.csv: judging the group-photo-cell-size rule needs
+// PER-PHOTO face counts and cell areas, which a per-SET total can't give.
+var perPhotoCSV = "set,file,face_count,smallest_face_height_fraction,default_cell_area_fraction,face_aware_cell_area_fraction\n"
+for row in perPhotoRows {
+    perPhotoCSV += [
+        row.setName,
+        csvField(row.fileName),
+        String(row.faceCount),
+        row.smallestFaceHeightFraction.map { String(format: "%.4f", $0) } ?? "",
+        String(format: "%.4f", row.defaultCellAreaFraction),
+        String(format: "%.4f", row.faceAwareCellAreaFraction)
+    ].joined(separator: ",") + "\n"
+}
+let perPhotoURL = URL(fileURLWithPath: outputDirPath).appendingPathComponent("per_photo.csv")
+try? perPhotoCSV.write(to: perPhotoURL, atomically: true, encoding: .utf8)
+
+print("LayoutLab: wrote \(summaryRows.count) sheet(s) + summary.csv + per_photo.csv to \(outputDirPath)")

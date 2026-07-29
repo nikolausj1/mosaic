@@ -99,6 +99,21 @@ and faces kept (post-threshold), the template index each variant chose, the
 face-aware decision's cost, faces clipped in each variant, and whether the
 two variants differ at all (`changed`).
 
+## per_photo.csv
+
+One row per PHOTO (not per set) - added for the group-photo-cell-size rule
+(the "bigger cell for a group shot, smaller for a selfie" request): `faces_kept`
+in `summary.csv` is a SET total, which can't tell a 6-person group photo
+with a small cell apart from a 1-person selfie with a big one in the same
+set. Columns: set, file, `face_count` (surviving faces in that photo),
+`smallest_face_height_fraction` (blank when the photo has no surviving
+face), and `default_cell_area_fraction` / `face_aware_cell_area_fraction`
+(each cell's area as a fraction of the full canvas, in the
+without-face-awareness and face-aware layouts respectively). Judge the rule
+by sorting a set's rows by `face_count` descending and checking that
+`face_aware_cell_area_fraction` is non-increasing down the list (more faces
+-> at least as much area), not by eyeballing the sheet alone.
+
 ## File ownership
 
 This tool owns only `Tools/LayoutLab/`. It never edits anything under

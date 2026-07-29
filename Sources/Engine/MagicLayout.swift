@@ -71,6 +71,36 @@ func mustKeepRegion(
     return expanded.intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
 }
 
+/// The smallest surviving face's own normalized height - a fraction of the
+/// PHOTO's own height, same units `thresholdedFaces`' pixel-height check
+/// already uses (`face.height * photoPixelSize.height` == that face's pixel
+/// height). Nil when no face survives the thresholds (saliency-only or
+/// nothing at all), same nil contract `mustKeepRegion` has.
+///
+/// This is the signal `mustKeepRegion`'s UNION cannot give you: the union
+/// only says how much of the frame the faces TOGETHER occupy, which a
+/// five-person group spread across a wide photo and a single centered
+/// selfie can both satisfy identically, even though one has tiny faces and
+/// the other has one big one. `framingCost`'s legibility term (below) scores
+/// against this - not the union - which is what actually lets a group photo
+/// earn a bigger cell than a selfie: see "THE PRINCIPLED FORM OF THAT RULE"
+/// in the B32 group-photo-cell-size request for the reasoning.
+///
+/// Deliberately its own function rather than a byproduct of
+/// `mustKeepRegion`: callers that only need the crop-safety region (e.g. a
+/// future caller that never wants the legibility term) can keep calling
+/// `mustKeepRegion` alone, and this stays cheap to compute (one more
+/// `thresholdedFaces` call, already O(faces) and already reused twice above).
+func smallestSurvivingFaceHeight(
+    faces: [CGRect],
+    faceConfidences: [Double],
+    photoPixelSize: CGSize
+) -> Double? {
+    let survivors = thresholdedFaces(faces: faces, faceConfidences: faceConfidences, photoPixelSize: photoPixelSize)
+    guard !survivors.isEmpty else { return nil }
+    return survivors.map { Double($0.height) }.min()
+}
+
 // MARK: - 2. Framing cost
 
 /// Relative weights within `framingCost`'s single sum. Tuned only so the
@@ -97,7 +127,38 @@ enum FramingCostWeight {
     /// mustKeep-less photo's contribution in `faceAwareAssignment` an exact
     /// match for that function's cost, not merely a similar one.
     static let aspect = 1.0
+    /// The group-photo-cell-size term: a photo whose SMALLEST surviving face
+    /// would render below `minLegibleFaceHeightFraction` in a candidate cell.
+    /// A related but distinct defect from `smallFace` (that term scores the
+    /// must-keep UNION's coverage of the crop; this one scores one specific
+    /// face's absolute rendered size against the whole canvas, the only way
+    /// a bigger cell can ever earn a lower cost - see `framingCost`'s doc
+    /// comment). Both real, both meant to stay secondary to an outright clip.
+    ///
+    /// 20.0, not 3.0 (`smallFace`'s weight) - EMPIRICALLY chosen, not just
+    /// guessed, against `Tools/LayoutLab` run over 61 real camera-roll
+    /// photos (15 sets) on 2026-07-28: this is the highest weight in a
+    /// sweep {3, 6, 10, 20, 30, 50, 80, 120, 200, 400} that changed zero
+    /// per-set clipped-face counts anywhere in that corpus (120 was the
+    /// first value that regressed one set's clip count, 1 -> 5 - see the
+    /// B32 group-photo-cell-size build-log entry for the full sweep table).
+    /// Deliberately NOT pushed higher just because it was available: per
+    /// `FramingCostWeight.clip`'s own contract, clip must stay dominant, and
+    /// a per-photo legibility contribution is capped at
+    /// `weight * minLegibleFaceHeightFraction` (2.4 at this weight) - small
+    /// next to even a mild single clip event, by design.
+    static let legibility = 20.0
 }
+
+/// Minimum rendered face height, expressed as a fraction of the CANVAS's own
+/// short edge (not the cell's - a fraction of the cell would cancel out
+/// exactly the effect this term exists to produce, since a bigger cell would
+/// then need a proportionally bigger face too; see `framingCost`'s doc
+/// comment for the full argument). Below this a face reads as a smudge
+/// rather than a face. Deliberately loose, a Phase 1 placeholder like
+/// `minMustKeepAreaCoverage` above - expected to move once Phase 4 tunes
+/// against real photos.
+let minLegibleFaceHeightFraction = 0.12
 
 /// Minimum acceptable fraction of the resulting crop's AREA that the
 /// must-keep region should occupy once framed as tightly as it safely can
@@ -109,14 +170,15 @@ enum FramingCostWeight {
 let minMustKeepAreaCoverage = 0.40
 
 /// Given a must-keep region (normalized to photo space, top-left origin),
-/// the photo's own pixel size, and a candidate cell's aspect ratio
-/// (width/height), scores how good a fit that cell shape is. Lower is
-/// better; 0 is a perfect match. Fully deterministic - pure arithmetic on
-/// the inputs, no randomness, no iteration over any unordered collection.
+/// the photo's own pixel size, and a candidate cell's REAL size (canvas
+/// points, same convention `solve(...)`'s `CellFrame.rect.size` already
+/// uses), scores how good a fit that cell is. Lower is better; 0 is a
+/// perfect match. Fully deterministic - pure arithmetic on the inputs, no
+/// randomness, no iteration over any unordered collection.
 ///
 /// Method: find the TIGHTEST zoom (in the app's own "1.0 == aspect-fill,
 /// larger == cropped in tighter" convention - see `PhotoRef.zoom` in
-/// `Model.swift`) whose crop, at `cellAspect`, still fully contains
+/// `Model.swift`) whose crop, at `cellSize`'s aspect, still fully contains
 /// `mustKeep`. Because a crop's visible photo-space extent shrinks
 /// monotonically as zoom increases (see `halfVisible` below), and the real
 /// zoom floor is 1.0 (aspect-fill - you cannot zoom OUT further), that
@@ -126,16 +188,46 @@ let minMustKeepAreaCoverage = 0.40
 /// tightest safe zoom is exactly the boundary where relaxing zoom any
 /// further would just start clipping, and everything else is scored
 /// relative to that.
-func framingCost(mustKeep: CGRect, photoPixelSize: CGSize, cellAspect: Double) -> Double {
-    guard mustKeep.width > 0, mustKeep.height > 0, cellAspect > 0,
+///
+/// `cellSize`'s ABSOLUTE magnitude, not just its aspect, is why this
+/// function can now tell a small cell from a big one at all: every OTHER
+/// term below (clip severity, area coverage, aspect mismatch) is a ratio
+/// against the photo's own or the must-keep region's own extent, which is
+/// PROVABLY invariant to scaling `cellSize` by any positive constant (see
+/// `halfVisible`'s own doc comment - it depends only on `cellSize`'s
+/// width/height RATIO). A cost built only from those terms is therefore
+/// structurally incapable of preferring a bigger cell over a smaller one at
+/// the same aspect, no matter how the weights are tuned - this was measured
+/// directly (a 4x canvas-area change moved the old aspect-only cost by
+/// 0.000000000000) before this parameter existed. The legibility term below
+/// is the one exception: it multiplies a normalized-to-photo quantity
+/// (`smallestFaceHeightFraction`) by `cellSize.height` itself, which is what
+/// finally produces an ABSOLUTE rendered size in canvas points - see that
+/// term's own comment for the derivation.
+///
+/// `canvasShortEdge` (canvas points, `min` of the full canvas's own
+/// width/height - NOT the cell's) is the legibility term's other half: the
+/// floor a rendered face must clear is stated as a fraction of the CANVAS,
+/// so it has to be compared against something that does not itself shrink
+/// or grow with the cell being scored. Defaults to `defaultReferenceShortEdge`
+/// (1000), the one scale every current caller already solves against, so a
+/// caller with no interest in the legibility term (`smallestFaceHeightFraction`
+/// nil, the default) never needs to think about it.
+func framingCost(
+    mustKeep: CGRect,
+    photoPixelSize: CGSize,
+    cellSize: CGSize,
+    canvasShortEdge: Double = defaultReferenceShortEdge,
+    smallestFaceHeightFraction: Double? = nil
+) -> Double {
+    guard mustKeep.width > 0, mustKeep.height > 0,
+          cellSize.width > 0, cellSize.height > 0,
           photoPixelSize.width > 0, photoPixelSize.height > 0 else { return 0 }
 
-    // `halfVisible` depends only on cellSize's ASPECT (see its own comment
-    // in AutoFrame.swift), so a synthetic (cellAspect, 1.0) size is a
-    // faithful stand-in for the real cell without needing its actual point
-    // dimensions - `framingCost` only ever gets a ratio from its caller.
-    let syntheticCell = CGSize(width: cellAspect, height: 1.0)
-    let vis1 = halfVisible(zoom: 1.0, photoPixelSize: photoPixelSize, cellSize: syntheticCell)
+    let cellAspect = aspect(cellSize)
+    guard cellAspect > 0 else { return 0 }
+
+    let vis1 = halfVisible(zoom: 1.0, photoPixelSize: photoPixelSize, cellSize: cellSize)
     let visW1 = 2 * vis1.hx
     let visH1 = 2 * vis1.hy
 
@@ -187,6 +279,35 @@ func framingCost(mustKeep: CGRect, photoPixelSize: CGSize, cellAspect: Double) -
     // `contentFitAssignment` already uses for photo-vs-cell aspect.
     let mustKeepAspect = mustKeepW / mustKeepH
     cost += FramingCostWeight.aspect * abs(log(mustKeepAspect) - log(cellAspect))
+
+    // The group-photo-cell-size term (see this function's own doc comment
+    // for the derivation of why THIS term, alone among the others, can
+    // depend on cellSize's absolute magnitude). Computed at whatever zoom the
+    // crop would ACTUALLY use - `tightestSafeZoom` when safe, but never below
+    // the real zoom floor of 1.0 even when clipping (a clipping cell still
+    // renders the photo at zoom 1.0; it just also eats the heavy clip
+    // penalty above), so this term is meaningful in both branches rather
+    // than only the safe one.
+    if let smallestFaceHeightFraction {
+        let appliedZoom = max(tightestSafeZoom, 1.0)
+        let resultingVisHForFace = visH1 / appliedZoom
+        if resultingVisHForFace > 0 {
+            // resultingVisHForFace is the fraction of the PHOTO's height
+            // visible at appliedZoom; by aspect-fill construction that
+            // visible fraction maps exactly onto cellSize.height (canvas
+            // points). So cellSize.height / resultingVisHForFace is
+            // "canvas points per unit of normalized-photo-height", and
+            // multiplying by smallestFaceHeightFraction (itself a fraction
+            // of the photo's height, same units `thresholdedFaces` already
+            // uses) converts it straight to the face's RENDERED height in
+            // canvas points - the one absolute, comparable-across-cell-sizes
+            // quantity this whole function has been missing.
+            let renderedFaceHeightPoints = smallestFaceHeightFraction * cellSize.height / resultingVisHForFace
+            let renderedFaceHeightFraction = renderedFaceHeightPoints / canvasShortEdge
+            let deficit = max(0.0, minLegibleFaceHeightFraction - renderedFaceHeightFraction)
+            cost += FramingCostWeight.legibility * deficit
+        }
+    }
 
     return cost
 }
@@ -241,6 +362,13 @@ func faceAwareAssignment(
     photos: [PhotoID],
     photoSizes: [PhotoID: CGSize],
     mustKeepRegions: [PhotoID: CGRect],
+    // Group-photo-cell-size signal (the smallest surviving face's normalized
+    // height per photo - see `smallestSurvivingFaceHeight`'s own comment).
+    // Defaults to empty so every caller written before this parameter
+    // existed still compiles unchanged and still gets exactly today's
+    // `framingCost` behavior (that term contributes 0 whenever a photo has
+    // no entry here, same as it does when the photo has no face at all).
+    mustKeepFaceHeights: [PhotoID: Double] = [:],
     canvasSize: CGSize,
     border: BorderStyle
 ) -> FaceAwareAssignment {
@@ -292,6 +420,7 @@ func faceAwareAssignment(
             originalOrder: originalOrder,
             photoSizes: photoSizes,
             mustKeepRegions: mustKeepRegions,
+            mustKeepFaceHeights: mustKeepFaceHeights,
             canvasSize: canvasSize,
             border: border
         )
@@ -308,6 +437,7 @@ func faceAwareAssignment(
             authoredCost: authoredCost,
             photoSizes: photoSizes,
             mustKeepRegions: mustKeepRegions,
+            mustKeepFaceHeights: mustKeepFaceHeights,
             canvasSize: canvasSize,
             border: border
         )
@@ -335,14 +465,20 @@ private func bestPermutationAndCost(
     originalOrder: [PhotoID],
     photoSizes: [PhotoID: CGSize],
     mustKeepRegions: [PhotoID: CGRect],
+    mustKeepFaceHeights: [PhotoID: Double],
     canvasSize: CGSize,
     border: BorderStyle
 ) -> (permutation: [PhotoID], cost: Double) {
     let (cells, _) = solve(root: template, canvasSize: canvasSize, border: border)
     let cellByID = Dictionary(uniqueKeysWithValues: cells.map { ($0.id, $0.rect) })
-    let slotAspects: [Double] = originalOrder.map { id in
-        cellByID[id].map { aspect($0) } ?? 1
+    // The cell's REAL size (canvas points), not just its aspect - this is
+    // the architectural change the group-photo-cell-size rule needed.
+    // `framingCost`'s own doc comment has the full "why aspect alone can
+    // never work" argument.
+    let slotSizes: [CGSize] = originalOrder.map { id in
+        cellByID[id]?.size ?? CGSize(width: 1, height: 1)
     }
+    let canvasShortEdge = min(canvasSize.width, canvasSize.height)
 
     var bestPermCost = Double.infinity
     var bestPermutation = originalOrder
@@ -351,15 +487,22 @@ private func bestPermutationAndCost(
         var cost = 0.0
         for slot in 0..<perm.count {
             let photoID = perm[slot]
-            let cellAspect = slotAspects[slot]
-            guard cellAspect > 0 else { continue }
+            let cellSize = slotSizes[slot]
+            guard cellSize.width > 0, cellSize.height > 0 else { continue }
 
             if let mustKeep = mustKeepRegions[photoID] {
                 let pixelSize = photoSizes[photoID] ?? CGSize(width: 1, height: 1)
-                cost += framingCost(mustKeep: mustKeep, photoPixelSize: pixelSize, cellAspect: cellAspect)
+                cost += framingCost(
+                    mustKeep: mustKeep,
+                    photoPixelSize: pixelSize,
+                    cellSize: cellSize,
+                    canvasShortEdge: canvasShortEdge,
+                    smallestFaceHeightFraction: mustKeepFaceHeights[photoID]
+                )
             } else {
+                let cellAspect = aspect(cellSize)
                 let photoAspect = aspect(photoSizes[photoID] ?? CGSize(width: 1, height: 1))
-                guard photoAspect > 0 else { continue }
+                guard photoAspect > 0, cellAspect > 0 else { continue }
                 cost += FramingCostWeight.aspect * abs(log(photoAspect) - log(cellAspect))
             }
         }
@@ -526,6 +669,7 @@ private func searchDividerFractions(
     authoredCost: Double,
     photoSizes: [PhotoID: CGSize],
     mustKeepRegions: [PhotoID: CGRect],
+    mustKeepFaceHeights: [PhotoID: Double],
     canvasSize: CGSize,
     border: BorderStyle
 ) -> (template: Node, permutation: [PhotoID], cost: Double) {
@@ -556,6 +700,7 @@ private func searchDividerFractions(
                 originalOrder: originalOrder,
                 photoSizes: photoSizes,
                 mustKeepRegions: mustKeepRegions,
+                mustKeepFaceHeights: mustKeepFaceHeights,
                 canvasSize: canvasSize,
                 border: border
             )
@@ -652,6 +797,9 @@ func chooseCanvasAndLayout(
     photos: [PhotoID],
     photoSizes: [PhotoID: CGSize],
     mustKeepRegions: [PhotoID: CGRect],
+    // See `faceAwareAssignment`'s own doc comment on this same parameter -
+    // same default, same degrade contract.
+    mustKeepFaceHeights: [PhotoID: Double] = [:],
     border: BorderStyle,
     userRatio: Ratio? = nil,
     referenceShortEdge: Double = defaultReferenceShortEdge
@@ -664,6 +812,7 @@ func chooseCanvasAndLayout(
             photos: photos,
             photoSizes: photoSizes,
             mustKeepRegions: mustKeepRegions,
+            mustKeepFaceHeights: mustKeepFaceHeights,
             canvasSize: canvasSize,
             border: border
         )

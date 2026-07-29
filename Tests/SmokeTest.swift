@@ -824,27 +824,93 @@ do {
 // =====================================================================
 do {
     // Degenerate inputs return 0 rather than dividing by zero / crashing.
-    check(near(framingCost(mustKeep: .zero, photoPixelSize: CGSize(width: 2000, height: 2000), cellAspect: 1.0), 0, 1e-9),
+    check(near(framingCost(mustKeep: .zero, photoPixelSize: CGSize(width: 2000, height: 2000), cellSize: CGSize(width: 500, height: 500)), 0, 1e-9),
           "framingCost: zero-size mustKeep -> 0")
-    check(near(framingCost(mustKeep: CGRect(x: 0, y: 0, width: 0.2, height: 0.2), photoPixelSize: CGSize(width: 2000, height: 2000), cellAspect: 0), 0, 1e-9),
-          "framingCost: zero cellAspect -> 0")
-    check(near(framingCost(mustKeep: CGRect(x: 0, y: 0, width: 0.2, height: 0.2), photoPixelSize: .zero, cellAspect: 1.0), 0, 1e-9),
+    check(near(framingCost(mustKeep: CGRect(x: 0, y: 0, width: 0.2, height: 0.2), photoPixelSize: CGSize(width: 2000, height: 2000), cellSize: .zero), 0, 1e-9),
+          "framingCost: zero cellSize -> 0")
+    check(near(framingCost(mustKeep: CGRect(x: 0, y: 0, width: 0.2, height: 0.2), photoPixelSize: .zero, cellSize: CGSize(width: 500, height: 500)), 0, 1e-9),
           "framingCost: zero photoPixelSize -> 0")
 
     // A tall, narrow must-keep region (a single portrait-oriented subject)
-    // fits safely in a narrow cell but gets clipped by a wide one.
+    // fits safely in a narrow cell but gets clipped by a wide one. Real
+    // (canvas-point) cell sizes now, not bare aspect ratios - cellSize's
+    // absolute magnitude matters as of the group-photo-cell-size rule (see
+    // `framingCost`'s own doc comment), even though these two cells
+    // happen to share a scale (500x1000 vs 1000x500) so this particular
+    // pair of checks is unaffected by it.
     let tallNarrow = CGRect(x: 0.4, y: 0.2, width: 0.15, height: 0.6)
     let portraitPhoto = CGSize(width: 2000, height: 3000)
-    let safeCost = framingCost(mustKeep: tallNarrow, photoPixelSize: portraitPhoto, cellAspect: 0.5)
-    let clippedCost = framingCost(mustKeep: tallNarrow, photoPixelSize: portraitPhoto, cellAspect: 2.0)
+    let safeCost = framingCost(mustKeep: tallNarrow, photoPixelSize: portraitPhoto, cellSize: CGSize(width: 500, height: 1000))
+    let clippedCost = framingCost(mustKeep: tallNarrow, photoPixelSize: portraitPhoto, cellSize: CGSize(width: 1000, height: 500))
     check(safeCost < 3, "framingCost: tall/narrow subject in a narrow cell scores low (no clip)")
     check(clippedCost > 10, "framingCost: tall/narrow subject in a wide cell scores high (clipped)")
     check(safeCost < clippedCost, "framingCost: the safe cell beats the clipping one")
 
     // Determinism: identical inputs, identical output, called twice.
-    let repeat1 = framingCost(mustKeep: tallNarrow, photoPixelSize: portraitPhoto, cellAspect: 2.0)
-    let repeat2 = framingCost(mustKeep: tallNarrow, photoPixelSize: portraitPhoto, cellAspect: 2.0)
+    let repeat1 = framingCost(mustKeep: tallNarrow, photoPixelSize: portraitPhoto, cellSize: CGSize(width: 1000, height: 500))
+    let repeat2 = framingCost(mustKeep: tallNarrow, photoPixelSize: portraitPhoto, cellSize: CGSize(width: 1000, height: 500))
     check(repeat1 == repeat2, "framingCost: identical inputs -> identical output (determinism)")
+}
+
+// =====================================================================
+// Phase 1.5 (group-photo-cell-size rule) - `framingCost`'s new legibility
+// term in isolation: the architectural fix (real cellSize, not just
+// aspect) actually moving the cost with cell AREA, the term contributing
+// exactly 0 when no face-height signal is given (degrade at the
+// framingCost level, not just the higher-level guards), and a small face
+// in a small cell costing strictly more than the SAME small face in a
+// bigger cell of the SAME aspect.
+// =====================================================================
+do {
+    // Same mustKeep/photo/aspect in every call - only cellSize's ABSOLUTE
+    // magnitude changes (aspect held fixed at 1.0, a square cell). Before
+    // this change this was PROVABLY impossible: a 4x canvas-AREA change
+    // (500x500 -> 1000x1000, aspect held at 1.0) moved the old aspect-only
+    // cost by 0.000000000000 - measured directly against the pre-change
+    // `framingCost` while scoping this work.
+    let smallGroupFace = CGRect(x: 0.1, y: 0.4, width: 0.8, height: 0.15) // wide union, faces individually small
+    let photoSize = CGSize(width: 3000, height: 2000)
+    let smallestFace = 0.05 // 5% of the photo's own height - a small face in a 5-person group
+
+    let costSmallCell = framingCost(
+        mustKeep: smallGroupFace, photoPixelSize: photoSize,
+        cellSize: CGSize(width: 500, height: 500), canvasShortEdge: 1000,
+        smallestFaceHeightFraction: smallestFace
+    )
+    let costBigCell = framingCost(
+        mustKeep: smallGroupFace, photoPixelSize: photoSize,
+        cellSize: CGSize(width: 1000, height: 1000), canvasShortEdge: 1000,
+        smallestFaceHeightFraction: smallestFace
+    )
+    check(costBigCell < costSmallCell, "framingCost: same face, same aspect, BIGGER cell costs strictly less (the group-photo rule's core claim)")
+
+    // No face-height signal at all (the default, and what every caller
+    // written before this parameter existed still passes) -> the
+    // legibility term contributes exactly 0, so cost is identical to
+    // whatever the pre-existing terms alone produce, regardless of
+    // cellSize's magnitude. This is the degrade guarantee AT THE
+    // framingCost LEVEL, one layer below `faceAwareAssignment`'s own guard.
+    let noSignalSmall = framingCost(mustKeep: smallGroupFace, photoPixelSize: photoSize, cellSize: CGSize(width: 500, height: 500), canvasShortEdge: 1000)
+    let noSignalBig = framingCost(mustKeep: smallGroupFace, photoPixelSize: photoSize, cellSize: CGSize(width: 1000, height: 1000), canvasShortEdge: 1000)
+    check(near(noSignalSmall, noSignalBig, 1e-9), "framingCost: with no smallestFaceHeightFraction, cost is scale-invariant exactly as before (legibility term contributes 0)")
+
+    // A selfie's one big face (60% of its own photo's height) clears the
+    // legibility floor even in the smaller cell above - no legibility
+    // penalty either size, so the two costs there must ALSO agree (the
+    // "selfie not penalized in a small cell" acceptance case, at the
+    // framingCost level).
+    let selfieMustKeep = CGRect(x: 0.2, y: 0.15, width: 0.6, height: 0.6)
+    let bigFace = 0.60
+    let selfieCostSmallCell = framingCost(
+        mustKeep: selfieMustKeep, photoPixelSize: CGSize(width: 2000, height: 2000),
+        cellSize: CGSize(width: 500, height: 500), canvasShortEdge: 1000,
+        smallestFaceHeightFraction: bigFace
+    )
+    let selfieCostNoSignalSmallCell = framingCost(
+        mustKeep: selfieMustKeep, photoPixelSize: CGSize(width: 2000, height: 2000),
+        cellSize: CGSize(width: 500, height: 500), canvasShortEdge: 1000
+    )
+    check(near(selfieCostSmallCell, selfieCostNoSignalSmallCell, 1e-9), "framingCost: a selfie's already-legible face adds ZERO legibility penalty even in a small cell")
 }
 
 // =====================================================================
@@ -1013,27 +1079,38 @@ func referenceAuthoredCost(
     template: Node,
     photoSizes: [PhotoID: CGSize],
     mustKeepRegions: [PhotoID: CGRect],
+    mustKeepFaceHeights: [PhotoID: Double] = [:],
     canvasSize: CGSize,
     border: BorderStyle
 ) -> Double {
     let originalOrder = photoIDs(in: template)
     let (cells, _) = solve(root: template, canvasSize: canvasSize, border: border)
     let cellByID = Dictionary(uniqueKeysWithValues: cells.map { ($0.id, $0.rect) })
-    let slotAspects: [Double] = originalOrder.map { id in cellByID[id].map { aspect($0) } ?? 1 }
+    // Real cellSize, not just aspect - mirrors `MagicLayout.swift`'s own
+    // (private) `bestPermutationAndCost` exactly, post-group-photo-cell-size
+    // change, so this reference stays a faithful stand-in for "what the
+    // AUTHORED fractions alone would score" rather than a stale one.
+    let slotSizes: [CGSize] = originalOrder.map { id in cellByID[id]?.size ?? CGSize(width: 1, height: 1) }
+    let canvasShortEdge = min(canvasSize.width, canvasSize.height)
 
     var bestCost = Double.infinity
     for perm in permutations(originalOrder) {
         var cost = 0.0
         for slot in 0..<perm.count {
             let photoID = perm[slot]
-            let cellAspect = slotAspects[slot]
-            guard cellAspect > 0 else { continue }
+            let cellSize = slotSizes[slot]
+            guard cellSize.width > 0, cellSize.height > 0 else { continue }
             if let mustKeep = mustKeepRegions[photoID] {
                 let pixelSize = photoSizes[photoID] ?? CGSize(width: 1, height: 1)
-                cost += framingCost(mustKeep: mustKeep, photoPixelSize: pixelSize, cellAspect: cellAspect)
+                cost += framingCost(
+                    mustKeep: mustKeep, photoPixelSize: pixelSize,
+                    cellSize: cellSize, canvasShortEdge: canvasShortEdge,
+                    smallestFaceHeightFraction: mustKeepFaceHeights[photoID]
+                )
             } else {
+                let cellAspect = aspect(cellSize)
                 let photoAspect = aspect(photoSizes[photoID] ?? CGSize(width: 1, height: 1))
-                guard photoAspect > 0 else { continue }
+                guard photoAspect > 0, cellAspect > 0 else { continue }
                 cost += FramingCostWeight.aspect * abs(log(photoAspect) - log(cellAspect))
             }
         }
@@ -1435,6 +1512,191 @@ do {
     check(result1.templateIndex == 0, "Phase 5: determinism (pinned) - templateIndex matches the cross-process-verified golden value")
     check(leafList(result1.template) == [a, b], "Phase 5: determinism (pinned) - leaf order matches the cross-process-verified golden value")
     check(near(result1.cost, 1.5464580378975552, 1e-9), "Phase 5: determinism (pinned) - cost matches the cross-process-verified golden value")
+}
+
+// =====================================================================
+// B32 follow-up - the group-photo-cell-size rule ("equalize RENDERED face
+// size"): `mustKeepFaceHeights` threaded through `faceAwareAssignment` /
+// `chooseCanvasAndLayout`, scored by `framingCost`'s new legibility term.
+// Covers the owner's literal acceptance list: a group photo winning a
+// bigger cell than a selfie, a selfie NOT penalized in a small cell when
+// its face still renders large, the faceless degrade with the new
+// parameter EXPLICITLY exercised (not just omitted), and determinism
+// (in-process repeat + a cross-process-verified pinned golden value, same
+// technique as the Phase 5 case above).
+//
+// Every case here uses DIFFERENT photo sizes and MIXED orientations (the
+// documented trap: a symmetric pair can pass by coincidence) - see
+// `Tools/LayoutLab` real-photo evidence (2026-07-28, 61 photos / 15 sets)
+// for why the scenario below is deliberately built ASPECT-NEUTRAL (both
+// mustKeeps tuned to the same real aspect) rather than left to chance: an
+// aspect-driven win would prove nothing about the legibility term
+// specifically, and real photos showed the two effects can easily point in
+// opposite directions.
+// =====================================================================
+
+do {
+    // group: landscape, 5-person union, deliberately SMALL smallest face
+    // (6% of its own photo height). selfie: PORTRAIT (mixed orientation
+    // vs group and neutral), one big face (50% of its own photo height).
+    // neutral: landscape, no mustKeep at all (aspect-fallback).
+    //
+    // Both mustKeeps are tuned to the SAME real aspect (1.4 - i.e.
+    // `mustKeepW/mustKeepH * photoAspect`, not the raw normalized ratio;
+    // see the "units bug" note in MagicLayout.swift's own history) so
+    // WITHOUT the face-height signal, aspect fit alone is a wash between
+    // group and selfie (verified below, not just asserted) - the ONLY
+    // thing that can break that tie is `mustKeepFaceHeights`.
+    let group = PhotoID()
+    let selfie = PhotoID()
+    let neutral = PhotoID()
+    let photos = [group, selfie, neutral]
+    let photoSizes: [PhotoID: CGSize] = [
+        group: CGSize(width: 3000, height: 2000),  // landscape, 1.5
+        selfie: CGSize(width: 1500, height: 2000), // portrait, 0.75
+        neutral: CGSize(width: 1800, height: 1200) // landscape, 1.5
+    ]
+    let mustKeepRegions: [PhotoID: CGRect] = [
+        group: CGRect(x: 0.15, y: 0.125, width: 0.7, height: 0.75),     // real aspect 1.4
+        selfie: CGRect(x: 0.175, y: 0.326, width: 0.65, height: 0.348)  // real aspect 1.4
+    ]
+    let mustKeepFaceHeights: [PhotoID: Double] = [
+        group: 0.06,
+        selfie: 0.50
+    ]
+    let canvasSize = CGSize(width: 1000, height: 1000)
+
+    func cellArea(_ template: Node, _ id: PhotoID) -> Double {
+        let (cells, _) = solve(root: template, canvasSize: canvasSize, border: .none)
+        guard let rect = cells.first(where: { $0.id == id })?.rect else { return -1 }
+        return Double(rect.width) * Double(rect.height)
+    }
+
+    // WITHOUT the signal: prove the aspect-neutral setup is genuine by
+    // showing group does NOT already win on aspect alone - selfie (or a
+    // tie) wins here, so any group win below cannot be aspect coincidence.
+    let without = faceAwareAssignment(photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions, mustKeepFaceHeights: [:], canvasSize: canvasSize, border: .none)
+    let groupAreaWithout = cellArea(without.template, group)
+    let selfieAreaWithout = cellArea(without.template, selfie)
+    check(groupAreaWithout <= selfieAreaWithout, "group-photo-cell-size: WITHOUT the face-height signal, group does NOT already win the bigger cell (confirms the setup is aspect-neutral, not stacked)")
+
+    // WITH the signal: the literal acceptance case - group (smallest face
+    // 6%) must win a LARGER cell than selfie (face already 50%, legible).
+    let with1 = faceAwareAssignment(photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions, mustKeepFaceHeights: mustKeepFaceHeights, canvasSize: canvasSize, border: .none)
+    let groupArea = cellArea(with1.template, group)
+    let selfieArea = cellArea(with1.template, selfie)
+    check(groupArea > selfieArea, "group-photo-cell-size: a small-faced group photo gets a LARGER cell than an already-legible selfie")
+    check(groupArea > groupAreaWithout, "group-photo-cell-size: the signal strictly GREW the group's own cell versus the no-signal baseline")
+
+    // Determinism: in-process repeat...
+    let with2 = faceAwareAssignment(photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions, mustKeepFaceHeights: mustKeepFaceHeights, canvasSize: canvasSize, border: .none)
+    check(with1.templateIndex == with2.templateIndex, "group-photo-cell-size: determinism - templateIndex repeats")
+    check(with1.template == with2.template, "group-photo-cell-size: determinism - resulting tree repeats")
+    check(near(with1.cost, with2.cost, 1e-12), "group-photo-cell-size: determinism - cost repeats")
+
+    // ...plus a pinned golden value standing in for the cross-process
+    // check (same convention as the Phase 5 pinned test above) - THIS
+    // exact (photos, sizes, mustKeep, mustKeepFaceHeights) input, with
+    // fixed PhotoID literals, was independently verified byte-identical
+    // across 3 separate OS processes while scoping this work (2026-07-28).
+    let pinnedA = PhotoID(uuidString: "00000000-0000-0000-0000-0000000000A1")!
+    let pinnedB = PhotoID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
+    let pinnedC = PhotoID(uuidString: "00000000-0000-0000-0000-0000000000C1")!
+    let pinnedD = PhotoID(uuidString: "00000000-0000-0000-0000-0000000000D1")!
+    let pinnedPhotos = [pinnedA, pinnedB, pinnedC, pinnedD]
+    let pinnedSizes: [PhotoID: CGSize] = [
+        pinnedA: CGSize(width: 3500, height: 1500),
+        pinnedB: CGSize(width: 1500, height: 3500),
+        pinnedC: CGSize(width: 2000, height: 2000),
+        pinnedD: CGSize(width: 2800, height: 2100)
+    ]
+    let pinnedMustKeep: [PhotoID: CGRect] = [
+        pinnedA: CGRect(x: 0.05, y: 0.35, width: 0.9, height: 0.3),
+        pinnedB: CGRect(x: 0.3, y: 0.1, width: 0.4, height: 0.8),
+        pinnedC: CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5),
+        pinnedD: CGRect(x: 0.1, y: 0.2, width: 0.6, height: 0.4)
+    ]
+    let pinnedFaceHeights: [PhotoID: Double] = [pinnedA: 0.08, pinnedB: 0.12, pinnedC: 0.20, pinnedD: 0.15]
+    let pinnedDecision = chooseCanvasAndLayout(photos: pinnedPhotos, photoSizes: pinnedSizes, mustKeepRegions: pinnedMustKeep, mustKeepFaceHeights: pinnedFaceHeights, border: .none)
+    check(pinnedDecision.canvasRatio == .square, "group-photo-cell-size: determinism (pinned) - canvasRatio matches the cross-process-verified golden value")
+    check(pinnedDecision.templateIndex == 0, "group-photo-cell-size: determinism (pinned) - templateIndex matches the cross-process-verified golden value")
+    check(photoIDs(in: pinnedDecision.template) == [pinnedC, pinnedB, pinnedA, pinnedD], "group-photo-cell-size: determinism (pinned) - leaf order matches the cross-process-verified golden value")
+    check(near(pinnedDecision.cost, 3.177596882882995, 1e-9), "group-photo-cell-size: determinism (pinned) - cost matches the cross-process-verified golden value")
+}
+
+do {
+    // "A selfie is not penalized for landing in a small cell when its face
+    // still renders large": a 2-photo set where the selfie ends up in the
+    // SMALLER of two cells, but its face (55% of its own photo height) still
+    // clears the legibility floor there - adding the signal must NOT change
+    // the decision at all versus leaving it out, proving the term is a
+    // genuine THRESHOLD (zero cost once legible), not a blanket "bigger is
+    // always better" pull that would fight a photo out of a cell it never
+    // needed to leave. Different sizes, mixed orientations.
+    let selfie = PhotoID()
+    let wide = PhotoID()
+    let photos = [selfie, wide]
+    let photoSizes: [PhotoID: CGSize] = [
+        selfie: CGSize(width: 1400, height: 1800), // portrait-ish
+        wide: CGSize(width: 3200, height: 1400)    // landscape, wide
+    ]
+    // wide's mustKeep spans nearly the whole frame at a wide aspect - a
+    // realistic panorama-style subject that legitimately wants the
+    // wide/stacked template's row shape, independent of any face signal.
+    let mustKeepRegions: [PhotoID: CGRect] = [
+        selfie: CGRect(x: 0.2, y: 0.12, width: 0.6, height: 0.62),
+        wide: CGRect(x: 0.04, y: 0.15, width: 0.92, height: 0.55)
+    ]
+    let mustKeepFaceHeights: [PhotoID: Double] = [selfie: 0.55]
+    let canvasSize = CGSize(width: 1000, height: 1000)
+
+    let without = faceAwareAssignment(photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions, mustKeepFaceHeights: [:], canvasSize: canvasSize, border: .none)
+    let with = faceAwareAssignment(photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions, mustKeepFaceHeights: mustKeepFaceHeights, canvasSize: canvasSize, border: .none)
+
+    check(without.templateIndex == with.templateIndex, "group-photo-cell-size: selfie-already-legible - adding the signal does not change which template wins")
+    check(without.template == with.template, "group-photo-cell-size: selfie-already-legible - adding the signal does not change the resulting tree")
+    check(near(without.cost, with.cost, 1e-9), "group-photo-cell-size: selfie-already-legible - adding the signal does not change the cost (zero contribution, already above floor)")
+}
+
+do {
+    // Degrade guarantee, `mustKeepFaceHeights` EXPLICITLY exercised (not
+    // just omitted) - passing an empty dict, or a dict with entries for
+    // photos that have no mustKeepRegion at all, must be exactly as inert
+    // as never mentioning the parameter. Asymmetric mixed set, same
+    // discipline as every other degrade case in this file.
+    let p1 = PhotoID()
+    let p2 = PhotoID()
+    let p3 = PhotoID()
+    let photos = [p1, p2, p3]
+    let photoSizes: [PhotoID: CGSize] = [
+        p1: CGSize(width: 1000, height: 2200),
+        p2: CGSize(width: 1100, height: 1800),
+        p3: CGSize(width: 1300, height: 2000)
+    ]
+    let canvasSize = CGSize(width: 1000, height: 1000)
+
+    let expectedIndex = defaultTemplateIndex(orientations: photos.map { photoSizes[$0]! })
+    let expectedTemplate = contentFitAssignment(
+        photoSizes: photoSizes,
+        template: templates(for: photos)[expectedIndex],
+        canvasSize: canvasSize,
+        border: .none
+    )
+
+    // A dict with entries the Engine should never look at anyway (no
+    // photo here has a mustKeepRegion, so mustKeepFaceHeights is inert
+    // regardless of its own contents) - the strongest form of "this
+    // parameter changes nothing without mustKeepRegions to pair it with".
+    let noisyFaceHeights: [PhotoID: Double] = [p1: 0.5, p2: 0.02, p3: 0.9]
+    let result = faceAwareAssignment(photos: photos, photoSizes: photoSizes, mustKeepRegions: [:], mustKeepFaceHeights: noisyFaceHeights, canvasSize: canvasSize, border: .none)
+    check(result.templateIndex == expectedIndex, "group-photo-cell-size degrade: mustKeepFaceHeights present but mustKeepRegions empty - still matches today's template")
+    check(result.template == expectedTemplate, "group-photo-cell-size degrade: mustKeepFaceHeights present but mustKeepRegions empty - still matches today's assignment exactly")
+    check(result.cost == 0, "group-photo-cell-size degrade: cost is exactly 0, same as the plain no-mustKeep degrade")
+
+    let decision = chooseCanvasAndLayout(photos: photos, photoSizes: photoSizes, mustKeepRegions: [:], mustKeepFaceHeights: noisyFaceHeights, border: .none)
+    check(decision.canvasRatio == .square, "group-photo-cell-size degrade (chooseCanvasAndLayout): stays square with mustKeepFaceHeights present but mustKeepRegions empty")
+    check(decision.templateIndex == expectedIndex, "group-photo-cell-size degrade (chooseCanvasAndLayout): still matches today's template")
+    check(decision.template == expectedTemplate, "group-photo-cell-size degrade (chooseCanvasAndLayout): still matches today's assignment exactly")
 }
 
 // =====================================================================
