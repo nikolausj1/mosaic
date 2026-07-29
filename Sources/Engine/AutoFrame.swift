@@ -13,6 +13,36 @@ struct AutoFrameInput {
     var faceConfidences: [Double]
     var salientRegion: CGRect?   // attention-based saliency box, normalized, top-left origin
     var photoPixelSize: CGSize   // effective (pre-rotation; prototype photos are qt 0)
+    /// The ORIGINAL asset's pixel dimensions, used ONLY by Step 3's
+    /// resolution guard - never for aspect math, which stays on
+    /// `photoPixelSize` throughout every other use in this file (proxy and
+    /// original share the same aspect; the orientation hazard below is the
+    /// one exception, and `autoFrame` corrects for it itself before use).
+    /// Defaults to nil, in which case the guard falls back to
+    /// `photoPixelSize` unchanged - existing callers that never populate
+    /// this see byte-identical behavior.
+    ///
+    /// Why this needs to exist at all: `photoPixelSize` is usually the
+    /// app's 2000px-capped editing proxy (see
+    /// `PhotoLibraryService.loadForEditing`), not the original photo. The
+    /// resolution guard's whole point is "don't zoom past the source's real
+    /// detail" - judged against the PROXY, a 4032px original always measures
+    /// as a <=2000px source and the guard caps every zoom at 1.0x, which is
+    /// why auto-zoom (Backlog B20) has never actually zoomed in production.
+    /// Export renders from the full-resolution original, so this field lets
+    /// the guard see the resolution that actually matters.
+    ///
+    /// ORIENTATION HAZARD: a source size read off the asset itself (e.g.
+    /// `PHAsset.pixelWidth`/`pixelHeight`, or a file's raw EXIF pixel
+    /// dimensions) is not guaranteed to agree with `photoPixelSize`'s
+    /// orientation - `photoPixelSize` comes from an orientation-corrected
+    /// (upright) decode, but the raw source dimensions for a rotated photo
+    /// can still be landscape when the upright photo is portrait (or vice
+    /// versa). Callers should NOT pre-swap this - pass the source's raw
+    /// width/height as read, and `autoFrame` detects and corrects the
+    /// mismatch by comparing this size's orientation against
+    /// `photoPixelSize`'s own.
+    var sourcePixelSize: CGSize?
     var cellSize: CGSize         // the cell this photo landed in, canvas points
 }
 
@@ -97,8 +127,33 @@ func autoFrame(_ input: AutoFrameInput) -> ROI? {
 
     // Step 3: resolution guard - low-res sources refuse to zoom.
     let vis1ForGuard = halfVisible(zoom: 1.0, photoPixelSize: input.photoPixelSize, cellSize: input.cellSize)
-    let visiblePxW = 2 * vis1ForGuard.hx * Double(input.photoPixelSize.width)
-    let visiblePxH = 2 * vis1ForGuard.hy * Double(input.photoPixelSize.height)
+    // Judge the guard against the ORIGINAL source's pixel dimensions, not
+    // `photoPixelSize` (usually a 2000px-capped editing proxy) - see
+    // `AutoFrameInput.sourcePixelSize`'s doc comment for the why. Falls back
+    // to `photoPixelSize` when absent, so this is a no-op for any caller
+    // that hasn't been updated to supply it.
+    //
+    // ORIENTATION HAZARD correction: `sourcePixelSize` may disagree with
+    // `photoPixelSize` on landscape-vs-portrait for a rotated photo (see
+    // that field's doc comment). `vis1ForGuard`'s hx/hy fractions were
+    // derived from `photoPixelSize`'s own (upright) orientation, so
+    // multiplying them by a source size in the WRONG orientation would
+    // swap which axis is "short" - e.g. judging a portrait photo's guard
+    // against its raw landscape pixel count would let it zoom in far past
+    // what its actual short edge supports. Detected by comparing
+    // width->height ordering (landscape/square vs portrait) between the
+    // two sizes, and corrected by swapping the source's width/height back
+    // in line before use.
+    var guardPixelSize = input.photoPixelSize
+    if let source = input.sourcePixelSize, source.width > 0, source.height > 0 {
+        let proxyIsLandscapeOrSquare = input.photoPixelSize.width >= input.photoPixelSize.height
+        let sourceIsLandscapeOrSquare = source.width >= source.height
+        guardPixelSize = (proxyIsLandscapeOrSquare == sourceIsLandscapeOrSquare)
+            ? source
+            : CGSize(width: source.height, height: source.width)
+    }
+    let visiblePxW = 2 * vis1ForGuard.hx * Double(guardPixelSize.width)
+    let visiblePxH = 2 * vis1ForGuard.hy * Double(guardPixelSize.height)
     let minVisPx = min(visiblePxW, visiblePxH)
     let guardCap = max(1.0, minVisPx / 2048.0)
     var finalZoom = min(zoomTarget, guardCap)

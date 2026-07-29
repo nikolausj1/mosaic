@@ -1,9 +1,9 @@
 ---
 title: "STATUS - Photo Collage"
 created: 2026-07-24
-modified: 2026-07-28
-version: 3.3
-author: Claude Opus 5 (claude-opus-5)
+modified: 2026-07-29
+version: 3.4
+author: Claude Sonnet 5 (claude-sonnet-5)
 tags:
 ---
 
@@ -45,6 +45,12 @@ Active Development, in App Store preparation. Feature-complete for v1 including 
 1. The device pass, top to bottom. It gates B26, the pacing decision, and any honest read on auto-framing quality.
 2. A folder of ~40 real photos through LayoutLab. That is Phase 4, and it is now the gate on whether the layout intelligence is genuinely good - the probe evidence in Biggest Risk says we cannot answer that from synthetic tests.
 3. Then either B32 Phase 3's remaining half (the handover movement, which waits on the ratio finding) or the remaining App Store fields, depending on whether the goal is a better app or a submitted one.
+
+## Recently done (2026-07-29)
+
+- **Two "written but never wired" bugs fixed.** (1) Auto-zoom (B20)'s resolution guard was being judged against the 2000px `loadForEditing` proxy instead of the original asset, so `guardCap` could never exceed 1.0 and auto-zoom has never actually zoomed in production - fixed via a new optional `AutoFrameInput.sourcePixelSize`, populated in `PickerView.buildDocument` from `PHAsset.pixelWidth/pixelHeight`, with an orientation-mismatch correction inside `autoFrame` itself (covered by two new smoke-test anchors, hand-verified against the underlying math). (2) The group-photo legibility term (`smallestSurvivingFaceHeight` / `mustKeepFaceHeights`) existed end-to-end in the Engine and in `Tools/LayoutLab` but `PickerView.buildDocument` never computed or passed it, so it did nothing in the shipping app - now wired into the same Vision pass that already builds `mustKeepRegions`, and into `-faceAwareLayoutOff`'s degrade path.
+- **`Tools/LayoutLab` updated to read real source-file pixel dimensions** (`readSourcePixelSize`, via `CGImageSourceCopyPropertiesAtIndex` - no full decode) so the resolution-guard fix is actually exercised, not just theoretically present.
+- **Verified against all 61 of your real camera-roll photos** (`_inbox/40_photo_dump`, git-stash before/after so both binaries built from the literal pre/post-fix source): clipped-face totals unchanged - setSize 4: 15 sets, 22 clipped (default path), 2 clipped (face-aware), before AND after; setSize 3: 20 sets, 29 clipped (default path), 2 clipped (face-aware), before AND after. No regression. Crops noticeably tighter in ~30 of 35 sheets (pixel-diffed), including the set12 (setSize 3) case the fix was written for - eyeballed a half-dozen sheets across both sizes, nothing looked over-cropped. Smoke test 294 -> 297 (3 new anchors), decision time ~7.5ms avg / ~9ms worst case for a 4-photo challenger search (60ms budget).
 
 ## Recently done (2026-07-28, evening)
 
@@ -111,3 +117,8 @@ Still to do
 Open risk: the "Mosaic" trademark question stays accepted-but-unresolved (13 leading matches, plus an existing App Store app in the category). The compound title helps discovery, not legal exposure.
 
 Structural risk: the project lives inside Dropbox, which caused a multi-hour outage on 2026-07-28 (file provider failing to serve repo files under disk pressure). Moving it to `~/Developer` is the real fix; Xcode projects in cloud-synced folders are a known-bad combination.
+
+## Lessons
+
+- **A real camera-roll photo dump cannot test an orientation-swap hazard by itself.** All 61 photos in `_inbox/40_photo_dump` read EXIF orientation `1` (already upright/baked-in) via `sips -g orientation` - so a bug-fix branch that corrects a mismatch between an orientation-corrected decode and a raw/rotated size (e.g. `PHAsset.pixelWidth/height` vs. a `kCGImageSourceCreateThumbnailWithTransform`-corrected proxy) can look fully verified against "real photos" while that code path never actually executes. Caught by writing a tiny standalone Swift driver (`swiftc` against the Engine sources + a throwaway `main.swift`) with synthetic mismatched-orientation inputs and hand/script-verified expected numbers, then hardening it into a permanent smoke-test anchor. Worth checking `sips -g orientation` (or equivalent) on any "real data" test corpus before trusting it to cover an orientation-dependent code path.
+- **`git stash push -u -m "<label>" -- <files>` / `git stash pop` is a clean way to get an honest "before" build for A/B verification** when a fix's actual effect must be measured against a real-data harness (not just unit-tested): stash the fix, build+run the harness for "before," pop the stash, build+run again for "after," same binary-build recipe both times. Cheaper and less error-prone than maintaining two branches or manually reverting/re-applying edits.

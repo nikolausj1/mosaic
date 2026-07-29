@@ -55,3 +55,31 @@ func loadPhotoProxy(url: URL) -> (image: CGImage, pixelSize: CGSize)? {
     guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbOptions as CFDictionary) else { return nil }
     return (cgImage, CGSize(width: cgImage.width, height: cgImage.height))
 }
+
+/// The original file's own pixel dimensions - read from the image's
+/// properties dictionary (`kCGImagePropertyPixelWidth`/`Height`), NOT by
+/// decoding it at full size. This is the "original asset" LayoutLab mirrors
+/// `PHAsset.pixelWidth`/`pixelHeight` with (see the app-side fix in
+/// `AutoFrame.swift`'s `AutoFrameInput.sourcePixelSize` / `PickerView.
+/// buildDocument`) - `loadPhotoProxy`'s own `pixelSize` above is the
+/// 2000px-capped proxy, which is exactly the number the resolution guard
+/// was wrongly being judged against before that fix.
+///
+/// ORIENTATION HAZARD, same one `AutoFrameInput.sourcePixelSize`'s doc
+/// comment describes: `kCGImagePropertyPixelWidth`/`Height` are the RAW
+/// stored dimensions, before the EXIF orientation tag is applied - so for a
+/// rotated photo they can disagree with `loadPhotoProxy`'s upright,
+/// orientation-CORRECTED `pixelSize` on landscape-vs-portrait. Deliberately
+/// NOT corrected here: `autoFrame` (AutoFrame.swift) already detects and
+/// fixes that mismatch itself by comparing this size's orientation against
+/// `photoPixelSize`'s, so callers - this one included - just pass the raw
+/// value through, exactly like `PickerView.buildDocument` passes
+/// `PHAsset.pixelWidth`/`pixelHeight` through unswapped.
+func readSourcePixelSize(url: URL) -> CGSize? {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+          let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+          let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+          let height = properties[kCGImagePropertyPixelHeight] as? NSNumber
+    else { return nil }
+    return CGSize(width: CGFloat(width.doubleValue), height: CGFloat(height.doubleValue))
+}

@@ -38,6 +38,13 @@ struct PhotoData {
     let id: PhotoID
     let cgImage: CGImage
     let pixelSize: CGSize
+    /// The original file's own pixel dimensions (`readSourcePixelSize`),
+    /// mirroring `PHAsset.pixelWidth`/`pixelHeight` in the real app - fed to
+    /// `autoFrame`'s resolution guard below so LayoutLab actually exercises
+    /// the Fix 1 code path instead of always seeing the 2000px proxy. Nil
+    /// only if reading the file's properties failed, in which case the
+    /// guard falls back to `pixelSize` (unchanged old behavior).
+    let sourcePixelSize: CGSize?
     let vision: (faces: [(CGRect, Double)], salient: CGRect?)
     let survivingFaces: [CGRect]
 }
@@ -132,6 +139,7 @@ func renderComparisonSheet(
                 faceConfidences: photo.vision.faces.map(\.1),
                 salientRegion: photo.vision.salient,
                 photoPixelSize: photo.pixelSize,
+                sourcePixelSize: photo.sourcePixelSize,
                 cellSize: cellRectLocal.size
             ))
             let zoom = roi?.zoom ?? 1.0

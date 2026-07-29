@@ -377,13 +377,31 @@ final class PickerState {
         var pixelSizes: [PhotoID: CGSize] = [:]
         var images: [PhotoID: UIImage] = [:]
         var assetByID: [PhotoID: PHAsset] = [:]
+        // Fix (2026-07-29): the resolution guard in `autoFrame` (Step 3,
+        // AutoFrame.swift) was being judged against `pixelSizes` - the
+        // 2000px-capped `loadForEditing` proxy, not the original asset -
+        // which meant `minVisPx / 2048` could never exceed 1.0 and auto-zoom
+        // (B20) never actually zoomed in production. `PHAsset.pixelWidth`/
+        // `pixelHeight` gives the ORIGINAL's dimensions; export renders from
+        // that original, so zooming against it is safe even though the
+        // editing proxy is smaller. No entry for the PHPicker-fallback path
+        // (no PHAsset there) - `AutoFrameInput.sourcePixelSize` defaults to
+        // nil and the guard falls back to the proxy size, unchanged from
+        // today. The orientation hazard (`PHAsset.pixelWidth/height` may not
+        // agree with the orientation-corrected proxy's aspect for a rotated
+        // photo) is handled inside `autoFrame` itself, not here - this dict
+        // holds the asset's dimensions exactly as PhotoKit reports them.
+        var sourcePixelSizes: [PhotoID: CGSize] = [:]
 
         for entry in loaded {
             let id = PhotoID()
             idsInOrder.append(id)
             pixelSizes[id] = entry.pixelSize
             images[id] = entry.image
-            if let asset = entry.asset { assetByID[id] = asset }
+            if let asset = entry.asset {
+                assetByID[id] = asset
+                sourcePixelSizes[id] = CGSize(width: asset.pixelWidth, height: asset.pixelHeight)
+            }
         }
 
         // A fresh collage starts with a genuinely zero border (Justin,
@@ -407,6 +425,14 @@ final class PickerState {
         var visionByID: [PhotoID: (faces: [(CGRect, Double)], salient: CGRect?)] = [:]
         var mustKeepRegions: [PhotoID: CGRect] = [:]
         var faceRectsByPhotoID: [PhotoID: [CGRect]] = [:]
+        // Fix (2026-07-29): the group-photo legibility term - `framingCost`'s
+        // `minLegibleFaceHeightFraction` weight, keyed off
+        // `smallestSurvivingFaceHeight` - was never populated here, so
+        // `chooseCanvasAndLayout`/`faceAwareAssignment` always saw the
+        // default empty dict and that whole term contributed nothing in the
+        // shipping app. Computed in this same Vision pass since it's the
+        // same surviving-faces list `mustKeepRegion` above already derives.
+        var mustKeepFaceHeights: [PhotoID: Double] = [:]
         for id in idsInOrder {
             guard let pixelSize = pixelSizes[id], let cgImage = images[id]?.cgImage else { continue }
             let vision = await library.visionInputs(cgImage: cgImage)
@@ -428,6 +454,13 @@ final class PickerState {
                 photoPixelSize: pixelSize
             ) {
                 mustKeepRegions[id] = region
+            }
+            if let smallest = smallestSurvivingFaceHeight(
+                faces: vision.faces.map(\.0),
+                faceConfidences: vision.faces.map(\.1),
+                photoPixelSize: pixelSize
+            ) {
+                mustKeepFaceHeights[id] = smallest
             }
             #if DEBUG
             NSLog("MAGIC vision: %dx%d rawFaces=%d kept=%d salient=%@ mustKeep=%@",
@@ -471,6 +504,16 @@ final class PickerState {
             // the tool Phase 4 will want when a real-camera-roll layout looks
             // wrong and the question is whether the faces caused it.
             mustKeepRegions: Self.isFaceAwareLayoutDisabled ? [:] : mustKeepRegions,
+            // Same toggle, same reasoning: starving the search of BOTH
+            // must-keep dicts at once is what makes `-faceAwareLayoutOff`
+            // degrade all the way back to `defaultTemplateIndex` +
+            // `contentFitAssignment` - leaving this one wired while zeroing
+            // only `mustKeepRegions` would still short-circuit through the
+            // Engine's own "hasAnyMustKeep" guard (keyed off `mustKeepRegions`,
+            // not this dict), so the degrade holds either way, but keeping
+            // both flags in lockstep here is the honest "before" state for
+            // the toggle's whole purpose.
+            mustKeepFaceHeights: Self.isFaceAwareLayoutDisabled ? [:] : mustKeepFaceHeights,
             border: border,
             // Stated intent wins over the content rule. Nil until the user
             // has set a ratio by hand at least once.
@@ -528,6 +571,7 @@ final class PickerState {
                     faceConfidences: vision.faces.map(\.1),
                     salientRegion: vision.salient,
                     photoPixelSize: pixelSize,
+                    sourcePixelSize: sourcePixelSizes[id],
                     cellSize: cellRect.size
                 )
                 roi = autoFrame(input)

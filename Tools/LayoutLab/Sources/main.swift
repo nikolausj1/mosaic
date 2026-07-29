@@ -131,7 +131,13 @@ for (setIndex, files) in sets.enumerated() {
         order.append(id)
         pixelSizes[id] = pixelSize
         fileNameByID[id] = url.lastPathComponent
-        photosByID[id] = PhotoData(id: id, cgImage: cgImage, pixelSize: pixelSize, vision: vision, survivingFaces: kept)
+        // Fix 1 verification: the ORIGINAL file's pixel dimensions, read
+        // without decoding at full size (see `readSourcePixelSize`'s own
+        // comment) - this is what makes the resolution-guard fix in
+        // `AutoFrame.swift` actually visible in a LayoutLab run instead of
+        // every photo still measuring as <=2000px against the proxy.
+        let sourcePixelSize = readSourcePixelSize(url: url)
+        photosByID[id] = PhotoData(id: id, cgImage: cgImage, pixelSize: pixelSize, sourcePixelSize: sourcePixelSize, vision: vision, survivingFaces: kept)
 
         if let region = mustKeepRegion(faces: vision.faces.map(\.0), faceConfidences: vision.faces.map(\.1), salientRegion: vision.salient, photoPixelSize: pixelSize) {
             mustKeepRegions[id] = region

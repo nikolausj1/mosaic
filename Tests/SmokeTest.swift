@@ -676,6 +676,73 @@ do {
     check(autoFrame(inputD) == nil, "autoFrame D: tiny face discarded -> nil")
 }
 
+do {
+    // Anchor E (2026-07-29 fix): the resolution guard must be judged against
+    // the ORIGINAL source's pixel dimensions, not the (possibly-capped)
+    // decoding proxy - `AutoFrameInput.sourcePixelSize`. A small saliency box
+    // (near-instant coverage -> zoomTarget clamps to the 2.0 ceiling well
+    // above any guardCap this test can produce) isolates the guard itself:
+    // whatever `finalZoom` comes out to IS the guard's cap.
+    let box = CGRect(x: 0.495, y: 0.495, width: 0.01, height: 0.01)
+    let photoPixelSize = CGSize(width: 1000, height: 1200) // portrait proxy
+    let cellSize = CGSize(width: 100, height: 140)
+
+    // No sourcePixelSize supplied (nil default): the guard falls back to the
+    // small proxy alone, exactly today's (pre-fix) behavior - a 1000x1200
+    // proxy caps zoom at 1.0 regardless of what the real photo could support.
+    let inputE0 = AutoFrameInput(
+        faces: [], faceConfidences: [],
+        salientRegion: box,
+        photoPixelSize: photoPixelSize,
+        cellSize: cellSize
+    )
+    if let roi = autoFrame(inputE0) {
+        check(near(roi.zoom, 1.0, 1e-9), "autoFrame E0: no sourcePixelSize -> guard still judged against the small proxy (zoom 1.0)")
+    } else {
+        check(false, "autoFrame E0: expected non-nil ROI")
+    }
+
+    // A 3x-larger ORIGINAL (3000x3600, same portrait orientation as the
+    // proxy) raises the guard's cap well past 1.0 - this is the actual bug
+    // fix: a photo that measured as low-res via the proxy alone can now
+    // zoom, because export renders from this original, not the proxy.
+    let inputE1 = AutoFrameInput(
+        faces: [], faceConfidences: [],
+        salientRegion: box,
+        photoPixelSize: photoPixelSize,
+        sourcePixelSize: CGSize(width: 3000, height: 3600),
+        cellSize: cellSize
+    )
+    if let roi = autoFrame(inputE1) {
+        check(near(roi.zoom, 1.255580357142857, 1e-6), "autoFrame E1: correctly-oriented sourcePixelSize raises the guard cap to ~1.2556")
+    } else {
+        check(false, "autoFrame E1: expected non-nil ROI")
+    }
+
+    // ORIENTATION HAZARD: the SAME original asset, but its dimensions arrive
+    // swapped (3600x3000, reading as LANDSCAPE) against the proxy's portrait
+    // orientation - exactly what `PHAsset.pixelWidth`/`pixelHeight` can do
+    // for a rotated photo. Un-swapped, this pairs the guard's width fraction
+    // against the wrong (bigger) axis and produces a HIGHER, unsafe cap
+    // (~1.4648 - hand-verified against this same math) - i.e. a portrait
+    // photo would be allowed to zoom in further than its real short edge
+    // supports. `autoFrame` must detect the mismatched orientation and
+    // correct it, landing on the EXACT SAME ~1.2556 as the correctly-
+    // oriented E1 case above, not the higher unswapped value.
+    let inputF = AutoFrameInput(
+        faces: [], faceConfidences: [],
+        salientRegion: box,
+        photoPixelSize: photoPixelSize,
+        sourcePixelSize: CGSize(width: 3600, height: 3000),
+        cellSize: cellSize
+    )
+    if let roi = autoFrame(inputF) {
+        check(near(roi.zoom, 1.255580357142857, 1e-6), "autoFrame F: orientation-mismatched sourcePixelSize is corrected before use (matches E1, not the ~1.4648 unswapped value)")
+    } else {
+        check(false, "autoFrame F: expected non-nil ROI")
+    }
+}
+
 // =====================================================================
 // Phase 5 - ExportPlan: requiredThumbnailMaxPixelSize / exportCellPlans
 // =====================================================================
