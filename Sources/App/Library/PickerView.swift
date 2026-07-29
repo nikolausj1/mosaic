@@ -644,6 +644,13 @@ struct PickerView: View {
     /// the position/scale change reads as one element moving, not a
     /// crossfade between two - see `welcomeStage` and `masthead`.
     @Namespace private var lockupNamespace
+    /// "Scatter to order" (Justin, 2026-07-28 approved design, replacing the
+    /// old plain centre-screen logo): the construction-lines/tiles/wordmark
+    /// beat machine - see `LaunchRevealOverlay.swift`. One instance for
+    /// `.pick` mode's lifetime, same as `launchPhase`; harmless to also carry
+    /// on a `.replace`-mode picker since `runLaunchChoreographyIfNeeded` (the
+    /// only caller of `run()`) never executes there.
+    @State private var launchReveal = LaunchRevealController()
 
     private let backgroundColor = Color(red: 0.043, green: 0.043, blue: 0.051)
 
@@ -710,6 +717,23 @@ struct PickerView: View {
             // install - `.welcomeReady` (lockup+rows+button, all static) if
             // this is a first run, else straight past the welcome to
             // `.arrived`.
+            //
+            // "Reduce Motion skips the whole thing" (spec) means skip the
+            // ANIMATED reveal, not the mark itself - every other Reduce-
+            // Motion path in this app still shows its static end state (the
+            // masthead's own lockup, the ghost demo, etc.), never a blank
+            // hole. `runLaunchChoreographyIfNeeded` never runs in this
+            // branch (it's gated on `launchPhase == .initial`, which this
+            // is not), so without this, `LaunchRevealController` would be
+            // left at its pre-run defaults - trims at 0, tiles off-position
+            // and transparent, wordmark opacity 0 - and the welcome screen's
+            // reserved mark space would render EMPTY. Pre-resolving it here
+            // (harmless even on the `.arrived` sub-branch, where
+            // `welcomeStage`/the mark isn't shown at all) is what keeps this
+            // consistent with every other Reduce-Motion path.
+            let reveal = LaunchRevealController()
+            reveal.presentFinishedImmediately()
+            _launchReveal = State(initialValue: reveal)
             _launchPhase = State(initialValue: neverSeenWelcome ? .welcomeReady : .arrived)
         } else {
             // The one case that actually animates: start at the shared
@@ -750,7 +774,30 @@ struct PickerView: View {
             }
         }
         .foregroundStyle(.white)
-        .task { await state.onAppear() }
+        .task {
+            #if DEBUG
+            // `-launchRevealDelayFetchMS N` (verification only): the real
+            // fetch is often already-instant on a warmed-up simulator/device
+            // (library access already authorized, `reload()` cheap) - which
+            // is exactly the case the reveal is SUPPOSED to snap through
+            // with no animation. Proving that is one thing; seeing the
+            // beats play out to confirm they look right needs a slower
+            // fetch to ride, hence this artificial delay - it never runs
+            // outside an explicit debug arg, so it changes nothing about
+            // real launch behavior.
+            let args = ProcessInfo.processInfo.arguments
+            if let i = args.firstIndex(of: "-launchRevealDelayFetchMS"), i + 1 < args.count, let ms = Double(args[i + 1]) {
+                try? await Task.sleep(nanoseconds: UInt64(ms * 1_000_000))
+            }
+            #endif
+            await state.onAppear()
+            // "Scatter to order"'s hard rule: the reveal rides THIS fetch
+            // (auth + `reload()`) and must never hold it up or wait on it in
+            // the other direction - this mark fires the instant it's done,
+            // and `LaunchRevealController` reads it cooperatively at each of
+            // its own staggered steps (see that file's header comment).
+            launchReveal.markLibraryReady()
+        }
         // Independent of the `.task` above: photo-permission prompts and
         // library loading must never wait on this beat+spring+welcome-hold,
         // so it's its own child task rather than sequenced after
@@ -831,39 +878,39 @@ struct PickerView: View {
         }
     }
 
-    /// Holds the oversized centered lockup for a beat, then stages whichever
-    /// path `init` decided this appearance should take. `guard launchPhase
-    /// == .initial` makes this a no-op on every appearance after the first
-    /// (or under Reduce Motion, or in `.replace` mode) - `init` already
-    /// resolved those synchronously to their settled state.
+    /// Plays the "scatter to order" reveal (`launchReveal.run()` - see
+    /// `LaunchRevealOverlay.swift`), THEN stages whichever path `init`
+    /// decided this appearance should take. `guard launchPhase == .initial`
+    /// makes this a no-op on every appearance after the first (or under
+    /// Reduce Motion, or in `.replace` mode) - `init` already resolved those
+    /// synchronously to their settled state, and `launchReveal.run()` itself
+    /// is a same-frame no-op in that case too (see its own Reduce-Motion
+    /// guard) - belt and suspenders.
     ///
-    /// Grand-entrance rework (Justin, 2026-07-26): every hold roughly
-    /// doubled from the original splash timing, and the lockup now gets a
-    /// full 1.2s alone before anything else appears - a real title-sequence
-    /// beat rather than a blink-and-you-miss-it pause. The rows themselves
-    /// don't fade in as one block anymore: `WelcomeInstructionRows` stages
-    /// each row on its own ~0.6s-staggered delay once `isRevealed` flips
-    /// (see that view), so the second hold below is sized to let the LAST
-    /// (fourth, on-device-AI) row finish landing before "Get started"
-    /// appears underneath them.
+    /// The old fixed "hold the lockup for N seconds" sleeps are GONE
+    /// (Justin, 2026-07-28, "scatter to order" replacing the plain
+    /// centre-screen logo): `launchReveal.run()` is bounded by the real
+    /// photo-library fetch (`markLibraryReady()`, called from the sibling
+    /// `.task` above) rather than a fixed timer, so there is nothing left
+    /// here to hold for - the moment it returns, the mark has either played
+    /// out in full or been cut short exactly to the fetch's own pace.
     private func runLaunchChoreographyIfNeeded() async {
         guard launchPhase == .initial else { return }
+        await launchReveal.run()
+        guard launchPhase == .initial else { return } // a dev-tools replay may have moved it
         if hasSeenWelcome {
-            // Returning user: the original splash - brief hold, then spring
-            // straight to the settled picker.
-            try? await Task.sleep(nanoseconds: 700_000_000)
-            guard launchPhase == .initial else { return } // a dev-tools replay may have moved it
+            // Returning user: straight into the settled picker - this is the
+            // whole reveal's job for that path, spec: "Today the app puts
+            // the logo centre-screen and slides it up to the picker."
+            LaunchTiming.mark("picker arrived (returning user)")
             withAnimation(.spring(response: 0.7, dampingFraction: 0.85)) {
                 launchPhase = .arrived
             }
         } else {
-            // First run: a full beat alone with the (now larger) lockup,
-            // then the teaching rows stagger in beneath it, then (once
-            // they've all landed) the CTA fades in at the BOTTOM of the
-            // screen. `.welcomeReady` HOLDS from there - no further timer,
-            // see `getStarted()`.
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
-            guard launchPhase == .initial else { return }
+            // First run: the teaching rows stagger in beneath the now-
+            // assembled mark, then (once they've all landed) the CTA fades
+            // in at the BOTTOM of the screen. `.welcomeReady` HOLDS from
+            // there - no further timer, see `getStarted()`.
             withAnimation(.easeOut(duration: 0.6)) {
                 launchPhase = .welcomeText
             }
@@ -912,6 +959,7 @@ struct PickerView: View {
         UserDefaults.standard.removeObject(forKey: "hasSeenCoachMarks")
         UserDefaults.standard.removeObject(forKey: "hasSeenEditor")
         state.resetLaunchAnimationFlag()
+        launchReveal.reset()
         launchPhase = UIAccessibility.isReduceMotionEnabled ? .welcomeReady : .initial
         showSettings = false
         Task { await runLaunchChoreographyIfNeeded() }
@@ -951,16 +999,23 @@ struct PickerView: View {
         ZStack {
             VStack(spacing: 28) {
                 Spacer()
-                lockupImage
-                    .frame(height: mastheadCompactLockupHeight * 2.2)
-                    .matchedGeometryEffect(id: "lockup", in: lockupNamespace)
-                    .allowsHitTesting(false)
-                    // Breathing room below the lockup (Justin, 2026-07-28 -
-                    // "move the text down a bit to give some padding below
-                    // the logo"): on top of the VStack's own 28pt spacing,
-                    // so the rows land a deliberate ~48pt below the lockup
-                    // instead of the old cramped 28pt.
-                    .padding(.bottom, 20)
+                // "Scatter to order" (Justin, 2026-07-28 approved design):
+                // construction lines draw, the tiles fall in and seat, then
+                // the wordmark fades up - replacing the old plain oversized
+                // `lockupImage` here. Same `matchedGeometryEffect` id/
+                // namespace on the wordmark image inside it, so the handoff
+                // into `masthead`'s compact lockup is unchanged.
+                LaunchRevealView(
+                    controller: launchReveal,
+                    lockupNamespace: lockupNamespace,
+                    wordmarkHeight: mastheadCompactLockupHeight * 2.2
+                )
+                // Breathing room below the lockup (Justin, 2026-07-28 -
+                // "move the text down a bit to give some padding below
+                // the logo"): on top of the VStack's own 28pt spacing,
+                // so the rows land a deliberate ~48pt below the lockup
+                // instead of the old cramped 28pt.
+                .padding(.bottom, 20)
 
                 // Present the whole time (not just at `.welcomeText`/
                 // `.welcomeReady`) so each row's own staggered `.animation`
@@ -975,6 +1030,23 @@ struct PickerView: View {
             }
             .padding(.horizontal, 36)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // "Any touch skips straight to the picker" (spec) - attached
+            // HERE, on this VStack, rather than on the outer ZStack that
+            // also contains "Get started" below: a `DragGesture
+            // (minimumDistance: 0)` on an ANCESTOR of an interactive child
+            // can win the touch before the child's own tap ever resolves
+            // (caught in review - it silently ate every tap on "Get
+            // started"). As a SIBLING in the same ZStack instead, ordinary
+            // front-to-back hit-testing applies: the button (added after,
+            // so on top) claims taps inside its own bounds first, and only
+            // the reveal's own on/off state gates whether this layer reacts
+            // at all - `allowsHitTesting` below stops it from being a
+            // hit-testing participant at every other time, not just a
+            // no-op handler.
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { _ in skipLaunchRevealIfPlaying() })
+            .onTapGesture { skipLaunchRevealIfPlaying() }
+            .allowsHitTesting(launchReveal.beat != .idle && launchReveal.beat != .done)
 
             // "Get started" now lives at the bottom of the screen, matching
             // the floating CTA's own position/size class exactly (80%-width
@@ -990,6 +1062,11 @@ struct PickerView: View {
                 }
             }
         }
+    }
+
+    private func skipLaunchRevealIfPlaying() {
+        guard launchReveal.beat != .idle, launchReveal.beat != .done else { return }
+        launchReveal.skip()
     }
 
     /// Reserved brand space at the top of the picker: just the wordmark now
