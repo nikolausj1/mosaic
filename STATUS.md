@@ -2,7 +2,7 @@
 title: "STATUS - Photo Collage"
 created: 2026-07-24
 modified: 2026-07-28
-version: 3.0
+version: 3.1
 author: Claude Fable 5 (claude-fable-5)
 tags:
 ---
@@ -25,6 +25,8 @@ Active Development, in App Store preparation. Feature-complete for v1 including 
 
 - [ ] **Run the device pass** - one guided checklist covering the original eight B26 checks plus everything built since: https://claude.ai/code/artifact/305b73b7-df5c-4e5b-8c15-4ed499e89625 (~45 min). Judge auto-framing and Magic Layout hardest; they have had the least honest evaluation.
       - unblocks: B26, Phase 7 sign-off, and the Magic Layout pacing decision
+- [ ] **Drop ~40 real photos in a folder for layout tuning** - messy everyday ones, not your best. Then `Tools/LayoutLab/run.sh <folder>` renders judgement sheets. This is the whole of Phase 4, and it is the gate on whether the face-aware layout and the new canvas ratio are actually any good (~10 min for you, then a conversation over the sheets)
+      - unblocks: B32 Phase 4, and the canvas-ratio finding below
 - [ ] **Decide Magic Layout pacing** - the reveal adds roughly 1.5s+ per collage. Recommendation on record: ration it (full show on the first collage, short after) rather than trimming the choreography. Needs your gut after four collages in a row (~5 min, during the device pass)
       - unblocks: B32 Phase 3
 - [ ] **Set the real IAP price and create the in-app purchase in App Store Connect** - $2.99 is a placeholder in `Mosaic.storekit`. The IAP must be submitted WITH the first version (~10 min)
@@ -44,6 +46,13 @@ Active Development, in App Store preparation. Feature-complete for v1 including 
 2. Report what the pass turns up; flags become the punch list.
 3. Then either B32 Phase 5 (canvas ratio joins the decision, see `Magic Layout Spec.md`) or the remaining App Store fields, depending on whether the goal is a better app or a submitted one.
 
+## Recently done (2026-07-28, evening)
+
+- **B32 Phase 5 - the canvas ratio joins the decision.** Every collage used to be born square by a hardcoded literal; the photos now get a say in the outermost variable in the whole layout system. Wired in end to end, with a sticky preference so that once you set a ratio by hand the app stops guessing. **But see Biggest Risk: with the current cost function it almost never actually changes anything.**
+- **LayoutLab, the Phase 4 tuning harness** (`Tools/LayoutLab/`). Point it at a folder of photos and it renders one sheet per set: today's layout beside the face-aware one, faces outlined, clipped faces in red. This is what turns "tune the weights against a real camera roll" from hours of hand-building collages into a flip-through.
+- **The reveal's unverified list is closed.** Skip-on-touch at three beats, Reduce Motion, the clipped-face rule and the edge paths all verified. The added wall clock is now measured rather than guessed: **+1.66s**, four times the budget - which makes the pacing call the feature's biggest open question.
+- **A glow-gating race found and fixed** - glows could be enabled from a plan build that skipped the clipped-face filter. Narrow (~30ms) and never observed visibly, but it is the one artifact this beat must never produce.
+
 ## Recently done (2026-07-28)
 
 - **B32 Magic Layout Phases 0, 1 and 2** - the picker-to-editor cut is now a sequence: chosen photos fly in, each detected face glows, the layout resolves while the glows burn, then all theater clears as the drag handles return. Faces genuinely choose the template and assignment, and dividers now move so a cell can grow to fit a group shot. On your phone (Phases 0-1); Phase 2 lands with the next deploy.
@@ -61,7 +70,7 @@ Active Development, in App Store preparation. Feature-complete for v1 including 
 
 ## Biggest Risk
 
-Auto-framing quality (B20) is the one feature that can silently embarrass the app on a stranger's random photo library, and it has only been judged against your ~4 curated test photos and simulator runs. It needs a real, harsh test against your actual camera roll before you'd want anyone else to hit Save.
+Layout quality has never been judged against real photos, and there is now hard evidence that matters. The new canvas-ratio decision (Phase 5) is wired in and verified correct, yet it clears its own override threshold in only 3 of 30 probe cases and did not fire once in six real simulator picks. Worse, every all-portrait four-photo set scored WORSE at 4:5 than at square - which is the exact example that motivated building it. So either the cost function is missing something real or the intuition was wrong, and the same cost function drives auto-framing (B20), the feature most able to silently embarrass the app on a stranger's photos. All of it has only ever been judged against ~4 curated photos and simulator runs. LayoutLab now makes the real test cheap; it just needs your camera roll.
 
 ---
 
