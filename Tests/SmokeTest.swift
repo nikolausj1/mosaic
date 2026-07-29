@@ -1186,6 +1186,258 @@ do {
 }
 
 // =====================================================================
+// Phase 5 - `chooseCanvasAndLayout`: the outermost decision (canvas ratio)
+// joining the Phase 1+2 search. Covers: an all-portrait set winning the
+// portrait challenger, an all-landscape set (mirrored) winning the
+// landscape challenger, a mixed set staying square, the override threshold
+// actually biting (a real-but-marginal improvement that must still lose),
+// sticky user preference overriding what the content rule would have
+// nominated, the faceless degrade path (including the specific trap of an
+// ALL-PORTRAIT faceless set, where the orientation rule alone would
+// nominate a challenger but the degrade guard must fire first), and
+// determinism (in-process repeat, plus a pinned golden value standing in
+// for the cross-process check - see the Phase 5 build-log entry for the
+// actual two-separate-processes run this was verified against).
+// =====================================================================
+
+do {
+    // All portrait, DIFFERING sizes (the trap: a symmetric pair - two
+    // identical photos - agrees by coincidence and can't tell a genuine
+    // orientation decision from a fluke; see Phase 1's own build-log entry
+    // for how that bit this project once already). A tall, narrow subject
+    // (mustKeep width 0.20 of the frame) that a 4:5 canvas frames
+    // noticeably better than square - clears the override threshold with
+    // room to spare (verified below, not merely asserted).
+    let a = PhotoID()
+    let b = PhotoID()
+    let photos = [a, b]
+    let photoSizes: [PhotoID: CGSize] = [
+        a: CGSize(width: 1000, height: 2200),
+        b: CGSize(width: 1100, height: 2000)
+    ]
+    let w = 0.20
+    let mustKeepRegions: [PhotoID: CGRect] = [
+        a: CGRect(x: (1 - w) / 2, y: 0.05, width: w, height: 0.9),
+        b: CGRect(x: (1 - w) / 2 - 0.02, y: 0.05, width: w, height: 0.9)
+    ]
+
+    let result = chooseCanvasAndLayout(photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions, border: .none)
+    check(result.canvasRatio == portraitChallengerRatio, "Phase 5: all-portrait (differing sizes) picks the portrait challenger (4:5)")
+    check(Set(leafList(result.template)) == Set(photos), "Phase 5: all-portrait - every photo still placed exactly once")
+}
+
+do {
+    // Mirror of the case above (landscape instead of portrait), same
+    // differing-sizes discipline.
+    let a = PhotoID()
+    let b = PhotoID()
+    let photos = [a, b]
+    let photoSizes: [PhotoID: CGSize] = [
+        a: CGSize(width: 2200, height: 1000),
+        b: CGSize(width: 2000, height: 1100)
+    ]
+    let mustKeepRegions: [PhotoID: CGRect] = [
+        a: CGRect(x: 0.05, y: 0.4, width: 0.9, height: 0.2),
+        b: CGRect(x: 0.05, y: 0.38, width: 0.9, height: 0.2)
+    ]
+
+    let result = chooseCanvasAndLayout(photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions, border: .none)
+    check(result.canvasRatio == landscapeChallengerRatio, "Phase 5: all-landscape (differing sizes) picks the landscape challenger (5:4)")
+    check(Set(leafList(result.template)) == Set(photos), "Phase 5: all-landscape - every photo still placed exactly once")
+}
+
+do {
+    // Mixed orientation (one portrait, one landscape), both carrying real
+    // must-keep regions - `nominateChallengerRatio` must return nil here,
+    // so the square default wins WITHOUT a second search ever running.
+    let a = PhotoID()
+    let b = PhotoID()
+    let photos = [a, b]
+    let photoSizes: [PhotoID: CGSize] = [
+        a: CGSize(width: 1000, height: 2200),
+        b: CGSize(width: 2200, height: 1000)
+    ]
+    let mustKeepRegions: [PhotoID: CGRect] = [
+        a: CGRect(x: 0.4, y: 0.05, width: 0.2, height: 0.9),
+        b: CGRect(x: 0.05, y: 0.4, width: 0.9, height: 0.2)
+    ]
+
+    check(nominateChallengerRatio(photos: photos, photoSizes: photoSizes) == nil, "Phase 5: mixed orientation - nominateChallengerRatio itself returns nil")
+    let result = chooseCanvasAndLayout(photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions, border: .none)
+    check(result.canvasRatio == .square, "Phase 5: mixed orientation set stays square")
+}
+
+do {
+    // The override threshold actually biting: a wider mustKeep (w=0.30,
+    // vs the clear-win case's 0.20) that a 4:5 canvas STILL frames better
+    // than square - genuinely better, not worse - but only marginally so.
+    // Verified directly against both canvases (not just asserted) that the
+    // improvement is real (> 0) yet falls short of
+    // `canvasRatioOverrideThreshold * photos.count`, so the challenger must
+    // still lose and the canvas must not churn for a marginal gain.
+    let a = PhotoID()
+    let b = PhotoID()
+    let photos = [a, b]
+    let photoSizes: [PhotoID: CGSize] = [
+        a: CGSize(width: 1000, height: 2200),
+        b: CGSize(width: 1100, height: 2000)
+    ]
+    let w = 0.30
+    let mustKeepRegions: [PhotoID: CGRect] = [
+        a: CGRect(x: (1 - w) / 2, y: 0.05, width: w, height: 0.9),
+        b: CGRect(x: (1 - w) / 2 - 0.02, y: 0.05, width: w, height: 0.9)
+    ]
+
+    check(nominateChallengerRatio(photos: photos, photoSizes: photoSizes) == portraitChallengerRatio, "Phase 5 threshold: this set still nominates the portrait challenger")
+
+    let squareDecision = faceAwareAssignment(
+        photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions,
+        canvasSize: nominalCanvasSize(for: .square, shortEdge: defaultReferenceShortEdge), border: .none
+    )
+    let challengerDecision = faceAwareAssignment(
+        photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions,
+        canvasSize: nominalCanvasSize(for: portraitChallengerRatio, shortEdge: defaultReferenceShortEdge), border: .none
+    )
+    let improvement = squareDecision.cost - challengerDecision.cost
+    check(improvement > 0, "Phase 5 threshold: the challenger genuinely IS better here (improvement > 0), not a strawman")
+    check(improvement <= canvasRatioOverrideThreshold * Double(photos.count), "Phase 5 threshold: but the improvement falls short of the override bar")
+
+    let result = chooseCanvasAndLayout(photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions, border: .none)
+    check(result.canvasRatio == .square, "Phase 5 threshold: a marginal improvement must NOT churn the canvas - square wins")
+}
+
+do {
+    // Sticky user preference: an all-LANDSCAPE set (which would nominate
+    // `landscapeChallengerRatio`, 5:4, on its own) but the caller passes an
+    // explicit `userRatio` of `portraitChallengerRatio` (4:5) - the
+    // opposite direction from what the content rule would have picked.
+    // The result must carry the user's ratio UNCHANGED, proving this isn't
+    // merely "returns some sensible default" but genuinely skips
+    // nomination and the override threshold entirely.
+    let a = PhotoID()
+    let b = PhotoID()
+    let photos = [a, b]
+    let photoSizes: [PhotoID: CGSize] = [
+        a: CGSize(width: 2200, height: 1000),
+        b: CGSize(width: 2000, height: 1100)
+    ]
+    let mustKeepRegions: [PhotoID: CGRect] = [
+        a: CGRect(x: 0.05, y: 0.4, width: 0.9, height: 0.2),
+        b: CGRect(x: 0.05, y: 0.38, width: 0.9, height: 0.2)
+    ]
+    check(nominateChallengerRatio(photos: photos, photoSizes: photoSizes) == landscapeChallengerRatio, "Phase 5 sticky: content rule alone would nominate landscape here")
+
+    let result = chooseCanvasAndLayout(
+        photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions, border: .none,
+        userRatio: portraitChallengerRatio
+    )
+    check(result.canvasRatio == portraitChallengerRatio, "Phase 5 sticky: user's hand-set ratio (4:5) is returned UNCHANGED, opposite of what content would have nominated")
+    check(Set(leafList(result.template)) == Set(photos), "Phase 5 sticky: the layout search still ran (at the user's ratio) - every photo placed exactly once")
+}
+
+do {
+    // Faceless degrade, ASYMMETRIC mixed-orientation sets (same discipline,
+    // and the same reused sets, as the Phase 1 degrade-guarantee tests
+    // above): with no must-keep region anywhere, `chooseCanvasAndLayout`
+    // must match EXACTLY what today's app flow produces - square canvas,
+    // `defaultTemplateIndex` + `contentFitAssignment` - for every one of
+    // these, not just the symmetric case that agrees by coincidence.
+    let sets: [(String, [CGSize])] = [
+        ("wide + square", [CGSize(width: 1920, height: 1080), CGSize(width: 1500, height: 1500)]),
+        ("tall + wide", [CGSize(width: 1080, height: 1920), CGSize(width: 1920, height: 1080)]),
+        ("3 mixed", [CGSize(width: 1080, height: 1920), CGSize(width: 1920, height: 1080), CGSize(width: 1500, height: 1500)]),
+        ("4 mixed", [CGSize(width: 1080, height: 1920), CGSize(width: 1920, height: 1080), CGSize(width: 1500, height: 1500), CGSize(width: 1920, height: 1080)])
+    ]
+    for (label, sizes) in sets {
+        let ids = sizes.map { _ in PhotoID() }
+        var photoSizes: [PhotoID: CGSize] = [:]
+        for (i, id) in ids.enumerated() { photoSizes[id] = sizes[i] }
+
+        let expectedIndex = defaultTemplateIndex(orientations: ids.map { photoSizes[$0]! })
+        let expectedTemplate = contentFitAssignment(
+            photoSizes: photoSizes,
+            template: templates(for: ids)[expectedIndex],
+            canvasSize: nominalCanvasSize(for: .square, shortEdge: defaultReferenceShortEdge),
+            border: .none
+        )
+        let result = chooseCanvasAndLayout(photos: ids, photoSizes: photoSizes, mustKeepRegions: [:], border: .none)
+        check(result.canvasRatio == .square, "Phase 5 degrade (asymmetric): \(label) stays square")
+        check(result.templateIndex == expectedIndex, "Phase 5 degrade (asymmetric): \(label) picks the SAME template as today")
+        check(result.template == expectedTemplate, "Phase 5 degrade (asymmetric): \(label) picks the SAME assignment as today")
+    }
+}
+
+do {
+    // THE trap this guard exists for: a FACELESS set that is ALSO
+    // all-portrait (asymmetric sizes). `nominateChallengerRatio` is blind
+    // to faces - it would nominate the portrait challenger here purely on
+    // orientation - so without an explicit degrade guard ABOVE the
+    // nomination step, this exact case would silently reshape the canvas
+    // for every faceless portrait pick (screenshots, portrait scans,
+    // panorama crops shot tall). It must not: canvas stays square, and the
+    // template/assignment match today's flow exactly, same as the
+    // faceless landscape/mixed cases above.
+    let a = PhotoID()
+    let b = PhotoID()
+    let c = PhotoID()
+    let photos = [a, b, c]
+    let photoSizes: [PhotoID: CGSize] = [
+        a: CGSize(width: 1000, height: 2200),
+        b: CGSize(width: 1100, height: 1800),
+        c: CGSize(width: 1300, height: 2000)
+    ]
+    check(nominateChallengerRatio(photos: photos, photoSizes: photoSizes) == portraitChallengerRatio, "Phase 5 degrade trap: orientation rule alone WOULD nominate portrait here")
+
+    let expectedIndex = defaultTemplateIndex(orientations: photos.map { photoSizes[$0]! })
+    let expectedTemplate = contentFitAssignment(
+        photoSizes: photoSizes,
+        template: templates(for: photos)[expectedIndex],
+        canvasSize: nominalCanvasSize(for: .square, shortEdge: defaultReferenceShortEdge),
+        border: .none
+    )
+    let result = chooseCanvasAndLayout(photos: photos, photoSizes: photoSizes, mustKeepRegions: [:], border: .none)
+    check(result.canvasRatio == .square, "Phase 5 degrade trap: faceless all-portrait set stays square (guard fires before nomination is even acted on)")
+    check(result.templateIndex == expectedIndex, "Phase 5 degrade trap: faceless all-portrait picks the SAME template as today")
+    check(result.template == expectedTemplate, "Phase 5 degrade trap: faceless all-portrait picks the SAME assignment as today")
+}
+
+do {
+    // Determinism. In-process repeat (same technique the Phase 1/2 tests
+    // above already use) plus a PINNED golden value using fixed PhotoID
+    // literals (not fresh UUIDs) standing in for the cross-process check:
+    // this exact (photos, sizes, mustKeep) input, with these exact photo
+    // identities, was independently verified byte-identical across THREE
+    // separate OS processes (not just this one) while building Phase 5 -
+    // see the build-log entry. Pinning the expected values here means a
+    // future Dictionary-iteration-order regression that happened to still
+    // agree with itself twice in a single process (the exact trap the
+    // spec warns about) would still be caught the moment it disagreed
+    // with these hardcoded expectations in any process.
+    let a = PhotoID(uuidString: "00000000-0000-0000-0000-00000000000A")!
+    let b = PhotoID(uuidString: "00000000-0000-0000-0000-00000000000B")!
+    let photos = [a, b]
+    let photoSizes: [PhotoID: CGSize] = [
+        a: CGSize(width: 1000, height: 2200),
+        b: CGSize(width: 1100, height: 2000)
+    ]
+    let w = 0.20
+    let mustKeepRegions: [PhotoID: CGRect] = [
+        a: CGRect(x: (1 - w) / 2, y: 0.05, width: w, height: 0.9),
+        b: CGRect(x: (1 - w) / 2 - 0.02, y: 0.05, width: w, height: 0.9)
+    ]
+
+    let result1 = chooseCanvasAndLayout(photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions, border: .none)
+    let result2 = chooseCanvasAndLayout(photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions, border: .none)
+    check(result1 == result2, "Phase 5: determinism - identical inputs, called twice in-process, identical MagicLayoutDecision")
+
+    // Golden values, verified across 3 separate process runs (2026-07-28).
+    check(result1.canvasRatio == portraitChallengerRatio, "Phase 5: determinism (pinned) - canvasRatio matches the cross-process-verified golden value")
+    check(result1.templateIndex == 0, "Phase 5: determinism (pinned) - templateIndex matches the cross-process-verified golden value")
+    check(leafList(result1.template) == [a, b], "Phase 5: determinism (pinned) - leaf order matches the cross-process-verified golden value")
+    check(near(result1.cost, 1.5464580378975552, 1e-9), "Phase 5: determinism (pinned) - cost matches the cross-process-verified golden value")
+}
+
+// =====================================================================
 // Summary
 // =====================================================================
 print("\(passed) passed, \(failed) failed")

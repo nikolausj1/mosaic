@@ -1,10 +1,10 @@
 // Sources/Engine/MagicLayout.swift
-// B32 Phase 1 + Phase 2 ("Magic Layout" - the face-aware layout DECISION).
-// Pure Foundation, no SwiftUI/UIKit/Photos/Vision - same rules as the rest
-// of Sources/Engine. See `Magic Layout Spec.md` (project root) and
-// Backlog.md B30/B32 for the why; this file is the how.
+// B32 Phase 1 + Phase 2 + Phase 5 ("Magic Layout" - the face-aware layout
+// DECISION). Pure Foundation, no SwiftUI/UIKit/Photos/Vision - same rules
+// as the rest of Sources/Engine. See `Magic Layout Spec.md` (project root)
+// and Backlog.md B30/B32 for the why; this file is the how.
 //
-// Four pieces, in the order the spec lists them:
+// Five pieces, in the order the spec lists them:
 //   1. `mustKeepRegion(...)`       - what a crop must not cut into.
 //   2. `framingCost(...)`         - how bad a given cell shape is for that
 //      region.
@@ -14,6 +14,12 @@
 //      nested inside #3's per-template loop (see that function's own
 //      comment for the search shape, the pruning, and why it stays
 //      bounded).
+//   5. Phase 5's `chooseCanvasAndLayout(...)` - the outermost decision.
+//      Runs #3 (which already contains #4) at the square default canvas,
+//      and again at a single content-nominated challenger ratio
+//      (`CanvasRatio.swift`'s `nominateChallengerRatio`), returning
+//      whichever wins as ONE coherent (ratio, template, assignment)
+//      result. See that function's own comment for the guardrails.
 import Foundation
 #if canImport(CoreGraphics)
 import CoreGraphics
@@ -566,4 +572,164 @@ private func searchDividerFractions(
     }
 
     return (currentTemplate, currentPermutation, currentCost)
+}
+
+// MARK: - 5. Phase 5: canvas ratio joins the decision
+
+/// The reference short edge Phase 5's searches solve against - the same
+/// units the App layer's own nominal search canvas already uses (1000; see
+/// `PickerView.buildDocument`'s `nominalCanvas`). A default parameter on
+/// `chooseCanvasAndLayout` rather than hardcoded inline so a caller (or a
+/// test) can override the scale, but every existing call site already
+/// assumes 1000.
+let defaultReferenceShortEdge = 1000.0
+
+/// Phase 5's ONE coherent decision: which canvas ratio AND which
+/// (template, assignment) pair to use with it, returned together rather
+/// than as two calls a caller could combine inconsistently (e.g. picking a
+/// ratio, then separately re-solving a DIFFERENT template's search against
+/// it). See this file's header comment and `Magic Layout Spec.md`'s Phase 5
+/// section for the why.
+struct MagicLayoutDecision: Equatable {
+    /// The chosen canvas ratio - either the caller's own sticky preference
+    /// (returned unchanged), the square default, or the one challenger the
+    /// content rule nominated and the override threshold cleared.
+    var canvasRatio: Ratio
+    /// Index into `templates(for:)`'s fixed-order candidate list, solved AT
+    /// `canvasRatio`.
+    var templateIndex: Int
+    /// `templates(for:)[templateIndex]`, with its leaves and fractions
+    /// resolved by `faceAwareAssignment` (Phase 1 + 2) at `canvasRatio` -
+    /// ready to hand straight to `solve(...)`.
+    var template: Node
+    /// The winning `faceAwareAssignment` cost AT `canvasRatio` - NOT
+    /// comparable across two different `MagicLayoutDecision`s computed at
+    /// different ratios (a portrait canvas's cell aspects differ from a
+    /// square canvas's, so their costs live on different scales); only
+    /// meaningful as "how good this particular decision is internally".
+    var cost: Double
+}
+
+/// Phase 5's top-level entry point - the outermost variable (canvas ratio)
+/// joining the decision Phase 1 + 2 already make (template + assignment +
+/// dividers). See `Magic Layout Spec.md`'s Phase 5 section for the full
+/// reasoning; summarized here as the four things this function does, in
+/// order:
+///
+/// 1. **Sticky preference.** If `userRatio` is non-nil, that is stated
+///    intent (same contract border thickness already has) - return it
+///    UNCHANGED and run no challenger search at all. The face-aware
+///    (template, assignment) search still runs, once, at that ratio, so the
+///    caller still gets one coherent decision.
+/// 2. **Degrade guarantee.** With no must-keep region anywhere (the
+///    faceless path), there is no face evidence to justify reshaping the
+///    canvas either - `nominateChallengerRatio` is deliberately blind to
+///    faces (orientation only), so without this guard a faceless
+///    all-portrait set (screenshots, portrait-shot panoramas, etc) would
+///    still get a canvas challenge on looks alone, which is exactly the
+///    "replacement, not improvement" outcome the spec rules out for the
+///    WHOLE Magic Layout system, not just Phase 1. Bailing out here, before
+///    a challenger is even nominated, keeps the faceless path both
+///    byte-identical to today (square canvas, `defaultTemplateIndex` +
+///    `contentFitAssignment`, via `faceAwareAssignment`'s own guard one
+///    level down) AND cheap - a single search, not two.
+/// 3. **Crude nomination.** Otherwise, `nominateChallengerRatio` looks at
+///    photo orientations only and nominates at most one challenger ratio.
+///    "Mixed" (its `nil` case) means no challenge - the square default wins
+///    by default, without a second search.
+/// 4. **Override threshold.** With a challenger nominated, run the SAME
+///    Phase 1 + 2 search again at the challenger's canvas, and let it win
+///    only if its cost beats the default's by more than
+///    `canvasRatioOverrideThreshold` per photo - see that constant's own
+///    comment for the units and the reasoning. A marginal win keeps the
+///    square default; churn requires a clear improvement.
+///
+/// Determinism: every branch is a fixed sequence of calls into
+/// deterministic functions (`nominateChallengerRatio`, `faceAwareAssignment`
+/// - itself already proven deterministic) - no randomness, no dictionary
+/// iteration drives any decision here either.
+func chooseCanvasAndLayout(
+    photos: [PhotoID],
+    photoSizes: [PhotoID: CGSize],
+    mustKeepRegions: [PhotoID: CGRect],
+    border: BorderStyle,
+    userRatio: Ratio? = nil,
+    referenceShortEdge: Double = defaultReferenceShortEdge
+) -> MagicLayoutDecision {
+    precondition((2...4).contains(photos.count), "chooseCanvasAndLayout supports 2...4 photos")
+
+    func decide(at ratio: Ratio) -> FaceAwareAssignment {
+        let canvasSize = nominalCanvasSize(for: ratio, shortEdge: referenceShortEdge)
+        return faceAwareAssignment(
+            photos: photos,
+            photoSizes: photoSizes,
+            mustKeepRegions: mustKeepRegions,
+            canvasSize: canvasSize,
+            border: border
+        )
+    }
+
+    // 1. Sticky preference - see doc comment above. Returns before ANY
+    // challenger nomination happens, so a hand-set ratio is never even
+    // compared against one.
+    if let userRatio {
+        let decision = decide(at: userRatio)
+        return MagicLayoutDecision(
+            canvasRatio: userRatio,
+            templateIndex: decision.templateIndex,
+            template: decision.template,
+            cost: decision.cost
+        )
+    }
+
+    let defaultDecision = decide(at: .square)
+
+    // 2. Degrade guarantee - see doc comment above. Same predicate
+    // `faceAwareAssignment` itself uses one level down, checked again here
+    // because a challenger being nominated is a DIFFERENT decision (canvas
+    // shape) than the template/assignment guard that predicate already
+    // protects, and needs its own bail-out.
+    let hasAnyMustKeep = photos.contains { mustKeepRegions[$0] != nil }
+    guard hasAnyMustKeep else {
+        return MagicLayoutDecision(
+            canvasRatio: .square,
+            templateIndex: defaultDecision.templateIndex,
+            template: defaultDecision.template,
+            cost: defaultDecision.cost
+        )
+    }
+
+    // 3. Crude nomination - orientation only, at most one challenger.
+    guard let challengerRatio = nominateChallengerRatio(photos: photos, photoSizes: photoSizes) else {
+        return MagicLayoutDecision(
+            canvasRatio: .square,
+            templateIndex: defaultDecision.templateIndex,
+            template: defaultDecision.template,
+            cost: defaultDecision.cost
+        )
+    }
+
+    let challengerDecision = decide(at: challengerRatio)
+
+    // 4. Override threshold - see `canvasRatioOverrideThreshold`'s own
+    // comment. Strict `>`, matching every other tie-break rule in this
+    // file: an exact tie (or anything short of a clear win) keeps the
+    // square default rather than churning the canvas shape.
+    let improvement = defaultDecision.cost - challengerDecision.cost
+    let requiredImprovement = canvasRatioOverrideThreshold * Double(photos.count)
+    if improvement > requiredImprovement {
+        return MagicLayoutDecision(
+            canvasRatio: challengerRatio,
+            templateIndex: challengerDecision.templateIndex,
+            template: challengerDecision.template,
+            cost: challengerDecision.cost
+        )
+    } else {
+        return MagicLayoutDecision(
+            canvasRatio: .square,
+            templateIndex: defaultDecision.templateIndex,
+            template: defaultDecision.template,
+            cost: defaultDecision.cost
+        )
+    }
 }
