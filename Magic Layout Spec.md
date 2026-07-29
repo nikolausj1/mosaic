@@ -2,8 +2,8 @@
 title: "Magic Layout - Build Spec"
 created: 2026-07-28
 modified: 2026-07-28
-version: 1.3
-author: Claude Fable 5 (claude-fable-5)
+version: 1.4
+author: Claude Opus 5 (claude-opus-5)
 tags:
 ---
 
@@ -175,11 +175,33 @@ The long pole, and it is judgment rather than engineering. Budget most of the ca
 - **Phase 1 - DONE, committed, and WIRED IN.** `buildDocument` now runs two passes: gather each photo's `mustKeepRegion`, then call `faceAwareAssignment` in place of `defaultTemplateIndex` + `contentFitAssignment`. Faces choose the layout.
 - **The reveal now shows causality.** Each detected face gets a glowing square and the destination cells resolve WHILE the glows are lit, so the arrangement visibly follows from the faces. At the end all theater clears and the editor's drag handles arrive, handing control back.
 - **Verified 2026-07-28** on simulator with two portraits: five faces detected and glowed, resolved to a stacked layout keeping every face whole, clean handoff. Debug + Release build; smoke test 219/219. **Installed on Justin's device.**
-- **Phase 2 - IN PROGRESS** (divider search). Seam is marked in `MagicLayout.swift`.
+- **Phase 2 - DONE and committed** (divider search).
+- **Phase 5 - IN PROGRESS** (canvas ratio joins the decision). Engine only so far.
 - **Phase 3/4 - not started.** Rationing, the re-run affordance, and tuning against a real camera roll.
+- **Release build with Phases 0-2 installed on Justin's device 2026-07-28 16:55.**
 
-### Unverified, and worth checking first on device
-Skip-on-touch and Reduce Motion after the glow rework; the "never glow a face the final layout clips" rule; and the added wall clock (last measured at ~1.4s BEFORE the glow beat, so likely longer now). Justin's call on pacing is the open decision - recommendation on record is to ration (full show on the first collage, short after) rather than trim uniformly.
+### Verification sweep (2026-07-28) - the previously unverified list, now closed
+
+Driven with real taps on simulator `44EE92E3`, using the DEBUG-only `-magicSlow N` flag to widen beats so a touch could land inside them.
+
+| Item | Verdict |
+|---|---|
+| Skip-on-touch at arrive, scan/glow, and mid-assemble | **PASS** - all three land on a complete, correct editor; no leftover glow, scrim or dimming |
+| Reduce Motion bypass | **PASS** - `sequence bypassed +1ms`, no overlay frame ever renders |
+| Never glow a face the final layout clips | **PASS in the landed state** - `facesSurvivingFinalCrop` filters at >= 98% area overlap against the real crop window, and the only renderer of face rects reads the filtered set, so a dropped face is structurally undrawable. Independently re-checked against source. **One reachable gap is under investigation:** the filter is skipped entirely when a plan is built before the editor publishes its canvas rect (`?? detected`), and `glowsEnabled` is computed from that unfiltered set |
+| 2-photo / 4-photo / no-faces-landscape edge paths | **PASS** - the faceless set degrades silently: same template, same permutation, `glows=off (degraded)` |
+
+**Added wall clock - MEASURED, and it is the real finding.** Three runs each, same four photos, "editor mounted" mark:
+
+| | Average |
+|---|---|
+| Bypassed (Reduce Motion) | ~1.01s |
+| Full sequence | ~2.68s |
+| **Delta** | **~+1.66s** |
+
+That is four times the spec's 400ms budget, and it grew from the ~1.4s measured at Phase 0 because the decide beat was added since. **This makes the pacing decision the single most consequential open question in the feature**, and it can only be answered with a phone in hand. Recommendation on record is unchanged: ration (full show on the first collage, short after) rather than trim uniformly.
+
+Caveat on all of the above: every simulator run uses the Vision CPU fallback, so these timings do not represent the device's Neural Engine path.
 
 ## Risks
 
