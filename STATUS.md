@@ -2,7 +2,7 @@
 title: "STATUS - Photo Collage"
 created: 2026-07-24
 modified: 2026-07-29
-version: 3.5
+version: 3.6
 author: Claude Opus 5 (claude-opus-5)
 tags:
 ---
@@ -43,23 +43,6 @@ Sorted by what unblocks the most. Items 1-3 are the ones that matter this week.
 ### Done, no longer yours
 
 The in-app purchase is fully configured in App Store Connect (Apple ID 6795797662, $2.99, 175 regions, copy, review notes, screenshot). The listing is complete. The 40 photos are in and have been run through LayoutLab twice. The pacing decision is made and shipped: everyone gets the full theater.
-
-- [ ] **Run the device pass** - one guided checklist covering the original eight B26 checks plus everything built since: https://claude.ai/code/artifact/305b73b7-df5c-4e5b-8c15-4ed499e89625 (~45 min). Judge auto-framing and Magic Layout hardest; they have had the least honest evaluation.
-      - unblocks: B26, Phase 7 sign-off, and the Magic Layout pacing decision
-- [ ] **Drop ~40 real photos in a folder for layout tuning** - messy everyday ones, not your best. Then `Tools/LayoutLab/run.sh <folder>` renders judgement sheets. This is the whole of Phase 4, and it is the gate on whether the face-aware layout and the new canvas ratio are actually any good (~10 min for you, then a conversation over the sheets)
-      - unblocks: B32 Phase 4, and the canvas-ratio finding below
-- [ ] **Decide Magic Layout pacing** - the reveal adds roughly 1.5s+ per collage. Recommendation on record: ration it (full show on the first collage, short after) rather than trimming the choreography. Needs your gut after four collages in a row (~5 min, during the device pass)
-      - unblocks: B32 Phase 3
-- [ ] **Set the real IAP price and create the in-app purchase in App Store Connect** - $2.99 is a placeholder in `Mosaic.storekit`. The IAP must be submitted WITH the first version (~10 min)
-      - unblocks: submission
-- [ ] **Test a real purchase from an Xcode run** - StoreKit only attaches to the scheme in Xcode, not a plain install, so this cannot be verified any other way (~10 min)
-      - unblocks: B8 sign-off
-- [ ] **Finish the App Store Connect listing** - everything is drafted and most fields are entered; the save was blocked on the App Review contact phone number. All values are in `App Store Listing.md` (~10 min)
-      - unblocks: submission
-- [ ] **Build the layered app icon in Icon Composer** - GUI-only, no CLI exists, so this is the one asset that needs your hands (~20 min). Dark and tinted asset-catalog variants already ship, so this is an improvement rather than a blocker
-- [ ] **One TestFlight tester besides you** (~15 min)
-      - unblocks: submission
-- [ ] **Sign off the accent color** - mockups in `_review/phase7-accent-*.png`; the brand blues are locked in code, so this is a confirmation rather than an open choice (~5 min)
 
 ## Next Up
 
