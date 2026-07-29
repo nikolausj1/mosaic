@@ -204,6 +204,26 @@ final class PickerState {
         hasPlayedLaunchAnimation = false
     }
 
+    /// The header row's "Clear (N)" control (Justin, 2026-07-28): empties
+    /// the entire selection in one tap - the whole reason it exists is that
+    /// a selection can scroll fully out of view, at which point finding each
+    /// thumbnail again just to deselect it is real friction. No confirmation
+    /// (decided): the cap is 4 photos and re-selecting is cheap.
+    ///
+    /// Clears the B32 thumbnail-frame/bitmap caches too, not just
+    /// `selectedAssetIDs`: `recordThumbFrames` only prunes a stale entry the
+    /// next time the grid publishes a preference change for a still-visible
+    /// cell, and a selection that scrolled off screen - exactly this
+    /// button's use case - may never do that on its own. Left stale, a
+    /// LATER pick could inherit a frame/bitmap that was never its own,
+    /// which is precisely the "flies in from a stale position" bug
+    /// `recordThumbFrames`'s doc comment already describes.
+    func clearSelection() {
+        selectedAssetIDs.removeAll()
+        thumbFrames.removeAll()
+        selectedThumbnails.removeAll()
+    }
+
     func toggleSelection(_ assetID: String) {
         // Every `return` below is followed by the same cache prune, so the
         // B32 thumbnail cache can never outlive the selection it mirrors.
@@ -1046,8 +1066,20 @@ struct PickerView: View {
     /// gesture on the grid itself, see `pinchToResizeGesture`), and now the
     /// settings gear has moved off it as well (Justin, 2026-07-27 - it lives
     /// in the hero header's top-right corner now, see `masthead`/
-    /// `settingsButton`) - so this row is just the album menu, the trailing
-    /// `Spacer` kept purely to hold it left-weighted.
+    /// `settingsButton`).
+    ///
+    /// "Clear (N)" now lives at the trailing end (Justin, 2026-07-28 -
+    /// opposite the album menu, same row): a selection can scroll fully out
+    /// of view in the grid below, and re-finding every picked thumbnail just
+    /// to deselect it was the only way to start over. `clearSelectionButton`
+    /// is ALWAYS in this HStack, never conditionally inserted - this row's
+    /// `.frame(height: 52)` already fixes its height regardless of content,
+    /// same as every other row in this masthead, and the fix for the old
+    /// tap-drift bug depends on nothing here ever depending on selection
+    /// state for its OWN layout. Fading opacity in/out (rather than
+    /// inserting/removing the view) is what keeps that true even under
+    /// SwiftUI's own re-layout, not just under this particular frame - see
+    /// `clearSelectionButton`.
     private var header: some View {
         HStack(spacing: 4) {
             Menu {
@@ -1069,10 +1101,39 @@ struct PickerView: View {
             }
 
             Spacer()
+
+            clearSelectionButton
         }
         .padding(.horizontal, 16)
         .frame(height: 52)
         .background(Color.white.opacity(0.06))
+    }
+
+    /// See `header`'s doc comment above for why this is always present in
+    /// the tree and only ever fades. Gated on `state.selectedAssetIDs.count`
+    /// specifically (not the combined `state.selectionCount`, which also
+    /// counts the denied-state PHPicker fallback path's picks) - this button
+    /// clears the GRID selection this row's album menu is about, and the
+    /// fallback path auto-confirms the instant it completes, so it never has
+    /// a scrolled-away selection to clear in the first place.
+    ///
+    /// No confirmation dialog (decided, not re-litigated here): the cap is 4
+    /// photos and re-selecting is cheap, so confirming every tap would be
+    /// worse friction than the rare mis-tap.
+    private var clearSelectionButton: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.easeInOut(duration: 0.2)) {
+                state.clearSelection()
+            }
+        } label: {
+            Text("Clear (\(state.selectedAssetIDs.count))")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.mosaicAccent)
+        }
+        .opacity(state.selectedAssetIDs.isEmpty ? 0 : 1)
+        .allowsHitTesting(!state.selectedAssetIDs.isEmpty)
+        .animation(.easeInOut(duration: 0.2), value: state.selectedAssetIDs.isEmpty)
     }
 
     /// Settings ingress (B28), now doing double duty as the Dev Tools entry
