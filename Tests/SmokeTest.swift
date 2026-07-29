@@ -636,8 +636,17 @@ do {
 }
 
 do {
-    // Anchor C: a surviving face, no saliency -> zoom stays 1.0; headroom-
-    // biased center gets clamp-forced on the y axis for this tall-photo geometry.
+    // Anchor C: a surviving face, no saliency. The face union (+ margin)
+    // occupies only ~3.4% of the frame at zoom 1.0, well under
+    // `minMustKeepAreaCoverage` (0.40) - Step 3.5's new tightening zooms in
+    // to close that gap, bounded here by the resolution guard (guardCap ==
+    // 1.5625 for this 4800x3200 source at this cellSize, which is tighter
+    // than both the no-clip bound (40/9) and the 2.0x ceiling). This
+    // replaces the old "zoom stays 1.0" anchor - that was exactly the B32
+    // set12 bug (a face-only photo with no saliency box never zoomed past
+    // 1.0 no matter how tiny the face was); center.y no longer hits the
+    // hy>=0.5 forced-0.5 branch either, since hy shrinks below 0.5 once
+    // zoom exceeds 1.0, and instead is a genuine clamp up from 0.307 to 0.32.
     let inputC = AutoFrameInput(
         faces: [CGRect(x: 0.4, y: 0.2, width: 0.1, height: 0.15)],
         faceConfidences: [0.9],
@@ -648,9 +657,9 @@ do {
     let roiC = autoFrame(inputC)
     check(roiC != nil, "autoFrame C: surviving face -> non-nil")
     if let roi = roiC {
-        check(near(roi.zoom, 1.0, 1e-9), "autoFrame C: zoom 1.0 (no saliency)")
+        check(near(roi.zoom, 1.5625, 1e-9), "autoFrame C: zoom tightens to 1.5625 (resolution-guard-capped) toward the 40% must-keep-area target")
         check(near(roi.center.x, 0.45, 1e-9), "autoFrame C: center.x == 0.45")
-        check(near(roi.center.y, 0.5, 1e-9), "autoFrame C: center.y clamp-forced to 0.5")
+        check(near(roi.center.y, 0.32, 1e-9), "autoFrame C: center.y clamps up to 0.32 at the new tighter zoom")
     }
 }
 
@@ -1599,6 +1608,23 @@ do {
     // exact (photos, sizes, mustKeep, mustKeepFaceHeights) input, with
     // fixed PhotoID literals, was independently verified byte-identical
     // across 3 separate OS processes while scoping this work (2026-07-28).
+    //
+    // TASK 2 (2026-07-29): investigated an iterated coordinate descent, a
+    // widened `dividerSearchGrid`, and a full joint combinatorial cross as
+    // possible fixes for the "most-populated photo should get the most
+    // area" request (set13/set18). All three were built and measured; none
+    // were adopted - each one either found no improvement for the actual
+    // reported cases, or (worse) found a lower `framingCost` that gives the
+    // most-populated photo LESS area, not more, confirmed via
+    // `Tools/LayoutLab` against the real photos. See `searchDividerFractions`
+    // and `dividerSearchGrid`'s own doc comments in `MagicLayout.swift` for
+    // the full root-cause finding (a capped legibility term losing out to
+    // uncapped clip/aspect terms once the search explores more of the
+    // space) and why fixing this needs `framingCost`'s own weights/caps
+    // revisited, not a smarter search. Code reverted to the original
+    // single-pass search over the original 0.3...0.7 grid - this pinned
+    // anchor's values are therefore UNCHANGED from before Task 2, not a new
+    // golden value.
     let pinnedA = PhotoID(uuidString: "00000000-0000-0000-0000-0000000000A1")!
     let pinnedB = PhotoID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
     let pinnedC = PhotoID(uuidString: "00000000-0000-0000-0000-0000000000C1")!

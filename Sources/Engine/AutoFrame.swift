@@ -101,7 +101,57 @@ func autoFrame(_ input: AutoFrameInput) -> ROI? {
     let visiblePxH = 2 * vis1ForGuard.hy * Double(input.photoPixelSize.height)
     let minVisPx = min(visiblePxW, visiblePxH)
     let guardCap = max(1.0, minVisPx / 2048.0)
-    let finalZoom = min(zoomTarget, guardCap)
+    var finalZoom = min(zoomTarget, guardCap)
+
+    // Step 3.5: tighten toward the same must-keep AREA-coverage target
+    // `framingCost`'s `minMustKeepAreaCoverage` (MagicLayout.swift) already
+    // assumes the layout chooser can rely on - so the framer delivers on it
+    // too, instead of only zooming when the photo's raw aspect happens to
+    // force it (see this function's own header comment / the B32 set12
+    // finding: a portrait photo in a portrait-ish cell needed no aspect-fill
+    // zoom and stayed at 1.0 even with a tiny face). `mustKeepRegion` gives
+    // the EXACT same subject region `framingCost` scores against: the
+    // surviving-face union plus margin when a face survives, else the raw
+    // saliency box untouched, else nil - so a photo with neither (a
+    // landscape, or anything Vision found nothing in) takes this branch
+    // never, and its behavior is unchanged, byte for byte.
+    if let subject = mustKeepRegion(
+        faces: input.faces,
+        faceConfidences: input.faceConfidences,
+        salientRegion: input.salientRegion,
+        photoPixelSize: input.photoPixelSize
+    ), subject.width > 0, subject.height > 0 {
+        let visW1 = 2 * vis1ForGuard.hx
+        let visH1 = 2 * vis1ForGuard.hy
+        let subjectW = Double(subject.width)
+        let subjectH = Double(subject.height)
+
+        // The zoom at which the subject would exactly touch the crop's edge
+        // on its tighter axis - beyond this, the crop starts clipping the
+        // subject. This bound outranks everything else here: it is derived
+        // the same way `framingCost`'s own `tightestSafeZoom` is (visible
+        // extent shrinks as 1/zoom, so this is just solving each axis's
+        // "visible extent == subject extent" for zoom and taking the
+        // tighter, binding one).
+        let noClipZoom = min(visW1 / subjectW, visH1 / subjectH)
+
+        // The zoom at which the subject's AREA would fill exactly
+        // `minMustKeepAreaCoverage` of the crop. Inverts `framingCost`'s own
+        // areaCoverage formula (coverage = subjectArea / visibleArea, and
+        // visibleArea shrinks as 1/zoom^2) to solve for zoom directly rather
+        // than searching for it.
+        let targetZoom = sqrt(minMustKeepAreaCoverage * visW1 * visH1 / (subjectW * subjectH))
+
+        // Never exceed: the no-clip bound above (outranks everything), the
+        // app's own 2.0x auto-zoom ceiling (Backlog B20, same one
+        // `zoomTarget` already clamps to), or the resolution guard already
+        // computed in Step 3 - and never zoom OUT from whatever
+        // saliency/resolution already chose, only ever in, and only as far
+        // as needed (conservative at the boundary: under-zooming is a far
+        // better failure than clipping a face).
+        let boundedTarget = min(targetZoom, noClipZoom, 2.0, guardCap)
+        finalZoom = max(finalZoom, boundedTarget)
+    }
 
     // Step 4: center.
     let rawCenter: CGPoint

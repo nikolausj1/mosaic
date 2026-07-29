@@ -524,6 +524,41 @@ private func bestPermutationAndCost(
 /// `applyingDividerFraction`'s comment) - for a plain 2-child split this IS
 /// the new fraction directly, which is what makes 0.3...0.7 read the same
 /// way here as it does in the spec's own framing.
+///
+/// TASK 2 INVESTIGATION (2026-07-29), NOT ADOPTED - recorded so it is not
+/// re-litigated blind: widening this to 0.2...0.8 DOES let the search reach
+/// set18's true `framingCost` minimum (measured at a divider fraction of
+/// ~0.26 via a 0.01-step brute-force sweep against set18's real photos -
+/// strictly lower cost, confirmed). But the resulting split moves the
+/// MOST-populated photo's cell SMALLER, not larger (measured on real
+/// `Tools/LayoutLab` output: set18's two 4-face group photos dropped from
+/// 15% each to 10% each while the 2-face selfie grew from 70% to 80%; the
+/// same direction showed up on set13 with plain iterated coordinate descent
+/// inside the ORIGINAL grid, no widening needed - the 7-face photo's cell
+/// shrank further, not grew). Root cause: `framingCost`'s legibility term
+/// (`FramingCostWeight.legibility`, `smallestFaceHeightFraction`) is capped
+/// at a maximum per-photo contribution of `20 * 0.12 = 2.4`, while the
+/// clip-avoidance term (weight 40, uncapped severity) and the aspect-
+/// mismatch term (weight 1, an unbounded log-distance) can swing far more
+/// with divider position - so whenever a photo's must-keep region is tight
+/// against a candidate cell's aspect (set18's group photos have faces
+/// spanning their full source width; set13's crowd photo similarly), a more
+/// thorough search chases THOSE terms, which can require SHRINKING a
+/// neighboring cell rather than growing it - directly against the
+/// legibility term's much weaker pull the other way. A smarter or wider
+/// SEARCH cannot fix this: it only finds MORE of the cost function's own
+/// preference, and that preference does not reliably match "give the
+/// most-populated photo the most area" once actually pursued to its true
+/// optimum. See the Task 2 hand-off notes for the full trail (iterated
+/// coordinate descent, a widened grid, and a full joint combinatorial cross
+/// were all built and measured - none delivered the acceptance goal, and
+/// two of the three actively worsened it) - fixing this for real needs
+/// `framingCost`'s own weights/caps revisited, which is out of scope here
+/// ("do not simply raise the weight" - and this investigation suggests the
+/// fix isn't a weight bump anyway, but the cap/uncapped-ness imbalance
+/// itself). Reverted to the original single-pass search over this original
+/// grid rather than ship a change that measurably moves the reported bug
+/// in the wrong direction.
 private let dividerSearchGrid: [Double] = [0.3, 0.4, 0.5, 0.6, 0.7]
 
 /// One divider inside a template's tree, located the same way
@@ -657,6 +692,18 @@ private func applyingDividerFraction(_ node: Node, path: [Int], index: Int, t: D
 /// fractions if a different one now fits better - this is what keeps the
 /// result a true (template, fractions, assignment) triple rather than
 /// fractions searched against a permutation that's gone stale.
+///
+/// TASK 2 INVESTIGATION (2026-07-29), NOT ADOPTED: an ITERATED version of
+/// this same coordinate descent (repeat the full sweep until a pass
+/// improves nothing) was built and measured against set13/set18's real
+/// photos. It genuinely finds a lower `framingCost` in several real sets
+/// (confirmed via `Tools/LayoutLab`) - but the resulting split gives the
+/// MOST-populated photo LESS area, not more, moving further from what B32's
+/// group-photo-cell-size request actually wants. See `dividerSearchGrid`'s
+/// own comment for the full root-cause explanation (a capped legibility
+/// term losing out to uncapped clip/aspect terms once the search explores
+/// more of the space) - this is a `framingCost` weighting issue, not
+/// something a more thorough SEARCH can fix, so single-pass ships unchanged.
 ///
 /// Never worse than the authored fractions: `currentCost` starts at
 /// `authoredCost` and only updates on a strict improvement, so a template
