@@ -2,7 +2,7 @@
 title: "Magic Layout - Build Spec"
 created: 2026-07-28
 modified: 2026-07-28
-version: 1.7
+version: 1.8
 author: Claude Opus 5 (claude-opus-5)
 tags:
 ---
@@ -191,6 +191,18 @@ The long pole, and it is judgment rather than engineering. Budget most of the ca
   - **The short-edge sizing convention is load-bearing, not arbitrary.** Border is stored as a fraction of the canvas short edge, so holding the short edge fixed at 1000 keeps the border identical in absolute terms across both candidate canvases. Matching area or diagonal instead would have skewed the cost comparison by border geometry alone.
 
 - **Phase 5 (App) - WIRED IN 2026-07-28**, commit `1c9e19e`. `buildDocument` calls `chooseCanvasAndLayout`; `solve`, `autoFrame` and `reclamp` all use the chosen canvas. Sticky preference persists from a tray tap or a bracket drag, never from the app's own choice. Verified on simulator: faceless sets still square, sticky works via both paths, the app never self-persists, a non-square canvas is correct at birth (export measured 3277x4096 = 0.8001 against a 4:5 preference), and the reveal resolves its destination geometry to the true non-square canvas.
+
+- **Phase 3 (rationing half) - DONE 2026-07-28.** The two dials from the design above, plus a Settings control (Always / First time only / Off; Reduce Motion still forces off). Measured on simulator, same four photos, 3+ runs each:
+
+| Path | Average |
+|---|---|
+| Bypassed (baseline) | 1062ms |
+| First-ever collage (generous) | 2754ms |
+| **Later collage (rationed)** | **1388ms** |
+
+  **+326ms on the common path**, inside the 400ms the spec asked for at Phase 0 and never got - and reached by compressing beats rather than cutting any, so no taste call was needed. Implementation also closed a mislabeling the rule exposed: the staggered glow reveal only begins once the document exists, so it could never overlap real work, yet was being counted as free and costing ~350ms unrationed. Simulator timings run the Vision CPU fallback and are not device-representative.
+
+  **Still unbuilt in Phase 3: the "handover" movement** (the glow migrating outward into the divider capsules and corner brackets) and the re-run affordance. The handover deliberately waits on the finding below - until the ratio decision genuinely fires, the brackets have nothing true to perform, and animating them would be staging the exact comparative claim this spec's honesty line rules out.
 
 ### THE FINDING THAT MATTERS: the ratio challenger almost never wins, and the spec's motivating example does not reproduce
 

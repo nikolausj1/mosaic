@@ -2,7 +2,7 @@
 title: "STATUS - Photo Collage"
 created: 2026-07-24
 modified: 2026-07-28
-version: 3.1
+version: 3.2
 author: Claude Opus 5 (claude-opus-5)
 tags:
 ---
@@ -44,7 +44,7 @@ Active Development, in App Store preparation. Feature-complete for v1 including 
 
 1. The device pass, top to bottom. It gates B26, the pacing decision, and any honest read on auto-framing quality.
 2. A folder of ~40 real photos through LayoutLab. That is Phase 4, and it is now the gate on whether the layout intelligence is genuinely good - the probe evidence in Biggest Risk says we cannot answer that from synthetic tests.
-3. Then either B32 Phase 3 (the theater's rationing and re-run affordance, designed and specced but not built) or the remaining App Store fields, depending on whether the goal is a better app or a submitted one.
+3. Then either B32 Phase 3's remaining half (the handover movement, which waits on the ratio finding) or the remaining App Store fields, depending on whether the goal is a better app or a submitted one.
 
 ## Recently done (2026-07-28, evening)
 
