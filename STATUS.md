@@ -2,8 +2,8 @@
 title: "STATUS - Photo Collage"
 created: 2026-07-24
 modified: 2026-07-29
-version: 3.4
-author: Claude Sonnet 5 (claude-sonnet-5)
+version: 3.5
+author: Claude Opus 5 (claude-opus-5)
 tags:
 ---
 
@@ -19,9 +19,30 @@ Active Development, in App Store preparation. Feature-complete for v1 including 
 
 ## Health
 
-🟡 At-risk - a great deal has been built and verified in the simulator, but **almost none of it has been used on a real phone**, and one finding makes that gap worse than it looked: Vision fails silently in the iOS Simulator, so every simulator judgement of auto-framing was of the fallback, not the feature. The device pass is now the single highest-value hour available.
+🟡 At-risk, but for a better reason than yesterday. The layout intelligence has now been judged against 61 real photos rather than 4 curated ones, and it holds up: clipped faces drop from 22 to 2 across fifteen 4-photo sets, and 29 to 2 across twenty 3-photo sets. Two features that were written but never actually ran (auto-zoom, and the group-photo term) now run. What keeps this amber is that **a full build has still never been driven by hand on a phone**, and one open question is a naming decision that gets much more expensive after submission.
 
 ## Waiting on Me
+
+Sorted by what unblocks the most. Items 1-3 are the ones that matter this week.
+
+- [ ] **Drive the new build on your phone, top to bottom** - everything from the 29th is installed: the launch reveal, the Clear button, the full theater with faces lighting one at a time, the real-collage paywall, and auto-zoom finally working. Guided checklist: https://claude.ai/code/artifact/305b73b7-df5c-4e5b-8c15-4ed499e89625 (~45 min)
+      - unblocks: B26, and any honest read on whether the theater still delights on the fourth collage
+- [ ] **Decide the name** - see `Naming Study.md`. This is time-sensitive in a way the rest is not: renaming before first submission is cheap, after is expensive. The study found that "mosaic" already means *pixelate a face* in this category, which is the opposite of what the app does (~20 min to read, then a decision)
+      - unblocks: the App Store listing, the icon, and every screenshot that carries the wordmark
+- [ ] **Judge the layout sheets** - `~/Desktop/mosaic-layout-sheets/` (4-photo) and `mosaic-layout-sheets-3up/` (3-photo). Tell me which layouts look WRONG to your eye. That is the one input I cannot generate, and it is what turns Phase 4 from mechanism into quality (~20 min)
+      - unblocks: B32 Phase 4, and the group-area weighting decision below
+- [ ] **Decide the group-area trade** - the photo with the most people should get the most area, and it does not. Three search approaches were tried and all made it worse; the cause is that `framingCost` caps the legibility term while clip-avoidance is uncapped. Fixing it means reweighting, which risks clipped faces. **Your call on how much clipping risk is worth better composition** (~10 min, over the sheets)
+      - unblocks: B32 Phase 4 completion
+- [ ] **Test a real purchase from an Xcode run** - StoreKit only attaches to the scheme in Xcode, not a plain install, so this cannot be verified any other way (~10 min)
+      - unblocks: B8 sign-off
+- [ ] **One TestFlight tester besides you** (~15 min)
+      - unblocks: submission
+- [ ] **Sign off the accent color** - mockups in `_review/phase7-accent-*.png`; the brand blues are locked in code, so this is a confirmation rather than an open choice (~5 min)
+- [ ] **Optional: rebuild the app icon in Icon Composer** - GUI-only, so it needs your hands. Dark and tinted variants already ship, so this is polish, not a blocker (~20 min). Recommend skipping for v1, and skipping entirely if the name changes
+
+### Done, no longer yours
+
+The in-app purchase is fully configured in App Store Connect (Apple ID 6795797662, $2.99, 175 regions, copy, review notes, screenshot). The listing is complete. The 40 photos are in and have been run through LayoutLab twice. The pacing decision is made and shipped: everyone gets the full theater.
 
 - [ ] **Run the device pass** - one guided checklist covering the original eight B26 checks plus everything built since: https://claude.ai/code/artifact/305b73b7-df5c-4e5b-8c15-4ed499e89625 (~45 min). Judge auto-framing and Magic Layout hardest; they have had the least honest evaluation.
       - unblocks: B26, Phase 7 sign-off, and the Magic Layout pacing decision
@@ -42,12 +63,16 @@ Active Development, in App Store preparation. Feature-complete for v1 including 
 
 ## Next Up
 
-1. The device pass, top to bottom. It gates B26, the pacing decision, and any honest read on auto-framing quality.
-2. A folder of ~40 real photos through LayoutLab. That is Phase 4, and it is now the gate on whether the layout intelligence is genuinely good - the probe evidence in Biggest Risk says we cannot answer that from synthetic tests.
-3. Then either B32 Phase 3's remaining half (the handover movement, which waits on the ratio finding) or the remaining App Store fields, depending on whether the goal is a better app or a submitted one.
+1. The device pass on the build installed 2026-07-29 00:35. Everything since the 28th is in it and none of it has been touched by hand.
+2. The naming decision, because it is the only open item that gets materially more expensive after submission.
+3. Judge the layout sheets, then settle the group-area weighting trade. That closes Phase 4 and with it the last quality unknown.
+4. Then gate the Settings dev rows behind `#if DEBUG`, archive, and TestFlight.
 
 ## Recently done (2026-07-29)
 
+- **A launch reveal, a Clear button, and a paywall that shows YOUR collage.** The launch animation builds the mark out of construction lines and falling tiles, and rides the photo-library fetch so it costs nothing on a warm start. The picker gained "Clear (N)" opposite Recents, built opacity-only so it cannot reintroduce the tap-drift bug. The paywall preview now renders the user's own collage through the real export path instead of a grey placeholder.
+- **The theater is no longer rationed.** Justin's call: every collage gets the full show, and faces now light one at a time across the whole set rather than per photo, with a hold after the last so "it found N faces" registers. Roughly +2.6s, deliberately.
+- **`Naming Study.md`** - ten agents across four phases. The headline finding is in Biggest Risk.
 - **Two "written but never wired" bugs fixed.** (1) Auto-zoom (B20)'s resolution guard was being judged against the 2000px `loadForEditing` proxy instead of the original asset, so `guardCap` could never exceed 1.0 and auto-zoom has never actually zoomed in production - fixed via a new optional `AutoFrameInput.sourcePixelSize`, populated in `PickerView.buildDocument` from `PHAsset.pixelWidth/pixelHeight`, with an orientation-mismatch correction inside `autoFrame` itself (covered by two new smoke-test anchors, hand-verified against the underlying math). (2) The group-photo legibility term (`smallestSurvivingFaceHeight` / `mustKeepFaceHeights`) existed end-to-end in the Engine and in `Tools/LayoutLab` but `PickerView.buildDocument` never computed or passed it, so it did nothing in the shipping app - now wired into the same Vision pass that already builds `mustKeepRegions`, and into `-faceAwareLayoutOff`'s degrade path.
 - **`Tools/LayoutLab` updated to read real source-file pixel dimensions** (`readSourcePixelSize`, via `CGImageSourceCopyPropertiesAtIndex` - no full decode) so the resolution-guard fix is actually exercised, not just theoretically present.
 - **Verified against all 61 of your real camera-roll photos** (`_inbox/40_photo_dump`, git-stash before/after so both binaries built from the literal pre/post-fix source): clipped-face totals unchanged - setSize 4: 15 sets, 22 clipped (default path), 2 clipped (face-aware), before AND after; setSize 3: 20 sets, 29 clipped (default path), 2 clipped (face-aware), before AND after. No regression. Crops noticeably tighter in ~30 of 35 sheets (pixel-diffed), including the set12 (setSize 3) case the fix was written for - eyeballed a half-dozen sheets across both sizes, nothing looked over-cropped. Smoke test 294 -> 297 (3 new anchors), decision time ~7.5ms avg / ~9ms worst case for a 4-photo challenger search (60ms budget).
@@ -76,7 +101,9 @@ Active Development, in App Store preparation. Feature-complete for v1 including 
 
 ## Biggest Risk
 
-Layout quality has never been judged against real photos, and a probe has now isolated a likely defect. `framingCost` - the function behind both the face-aware layout choice AND auto-framing (B20) - is minimised at a cell aspect of ~1.12 for a subject whose real aspect is 0.65, with a local MAXIMUM at the correct value. It prefers cells that do not suit the subject. That explains why portrait sets keep choosing square canvases and why the Phase 5 ratio challenger almost never fires. A separate, smaller units bug in the same function is fixed on branch `fix/framing-cost-aspect-units`, left unmerged because it changes every collage with a face and breaks 4 smoke assertions that encode the old numbers. **Nothing here should be tuned until real photos have gone through LayoutLab** - the dominant term is the area-coverage one, and changing weights against synthetic inputs is how this gets confidently wrong.
+The name. Everything else on this page is recoverable; a name is not, once the app ships under it. `Naming Study.md` found - and the finding was independently re-verified - that "mosaic" in the App Store's photo vocabulary already means *pixelate a face into blocks*. The category is full of blur and censorship tools using it, one called literally "Mosaic: Blur & Censor Photo", another using facial recognition to automatically obscure the faces it detects. This app detects faces in order to keep them whole. The name currently asserts the opposite of the differentiator, on the same shelf, and no modifier repairs that.
+
+Second, and now better understood than feared: `framingCost` drives both the layout choice and auto-framing, and its balance is off - the legibility term is capped at 2.4 per photo while clip-avoidance and aspect-mismatch are uncapped, so searching harder chases the wrong terms and gives group photos LESS area. On real photos the function still performs well where it matters (22 clipped faces down to 2), so this is a composition-quality ceiling rather than a correctness bug. A separate units bug in the same function sits fixed but unmerged on `fix/framing-cost-aspect-units`, because it changes every collage with a face and breaks 4 assertions that encode the old numbers.
 
 ---
 
