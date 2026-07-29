@@ -2,7 +2,7 @@
 title: "Magic Layout - Build Spec"
 created: 2026-07-28
 modified: 2026-07-28
-version: 1.6
+version: 1.7
 author: Claude Opus 5 (claude-opus-5)
 tags:
 ---
@@ -189,6 +189,21 @@ The long pole, and it is judgment rather than engineering. Budget most of the ca
 - **Phase 5 (Engine) - DONE 2026-07-28.** `Sources/Engine/CanvasRatio.swift` (canonical 9-preset list, orientation-only nomination rule, override threshold, `nominalCanvasSize`) plus `chooseCanvasAndLayout` in `MagicLayout.swift`. Smoke test 238 -> 272. Timing: ~14ms worst case (challenger nominated, two searches), ~7ms common case (mixed orientation, no challenger) against a 60ms budget. A full nine-preset sweep would have been ~65-130ms, which is why only one challenger is nominated.
   - **Degrade guarantee independently re-proven by the lead**, not merely by the worker's own test: 3276 asymmetric faceless sets across three border configurations, every one byte-identical to the legacy `defaultTemplateIndex` + `contentFitAssignment` path. That included 36 all-portrait faceless sets - the precise case an orientation-only rule could have wrongly challenged, and the reason the worker added a face-aware guard ahead of nomination.
   - **The short-edge sizing convention is load-bearing, not arbitrary.** Border is stored as a fraction of the canvas short edge, so holding the short edge fixed at 1000 keeps the border identical in absolute terms across both candidate canvases. Matching area or diagonal instead would have skewed the cost comparison by border geometry alone.
+
+- **Phase 5 (App) - WIRED IN 2026-07-28**, commit `1c9e19e`. `buildDocument` calls `chooseCanvasAndLayout`; `solve`, `autoFrame` and `reclamp` all use the chosen canvas. Sticky preference persists from a tray tap or a bracket drag, never from the app's own choice. Verified on simulator: faceless sets still square, sticky works via both paths, the app never self-persists, a non-square canvas is correct at birth (export measured 3277x4096 = 0.8001 against a 4:5 preference), and the reveal resolves its destination geometry to the true non-square canvas.
+
+### THE FINDING THAT MATTERS: the ratio challenger almost never wins, and the spec's motivating example does not reproduce
+
+Phase 5 is wired in and correct, and **with the current cost function it changes almost nothing.** Simulator testing saw the challenger rejected in all six real picks, including a deliberately adversarial wide image with three faces pinned to one edge. A follow-up lead probe over 30 synthetic sets (5 must-keep shapes x counts 2-4 x portrait and landscape) found it clears the threshold in **3 of 30**.
+
+The threshold is not the whole story, and lowering it would be the wrong fix:
+
+- The challenger is **worse than square in 17 of 30 cases** - the orientation-only nomination rule is proposing losers about half the time. A lower threshold only admits cases with small POSITIVE margins; it does nothing for the negative ones.
+- **Every all-portrait 4-photo set scored WORSE at 4:5 than at square** (margins -0.06 to -0.32 per photo, all five variants). That is precisely this phase's motivating example - "four portraits in a square canvas crops every face harder than necessary" - and the measurement says the opposite.
+
+So one of three things is true, and Phase 4 has to determine which: the cost function is missing something real about canvas shape; the motivating intuition is wrong; or comparing costs across canvases of different AREA is not the apples-to-apples comparison it appears to be (short-edge sizing keeps the border honest, but total area still differs by 25 percent between square and 4:5).
+
+**Deliberately NOT tuned here.** The probe uses synthetic must-keep regions, and tuning a cost function against invented inputs is how a model gets confidently wrong. `Tools/LayoutLab/` exists precisely so this can be answered with a real camera roll, and that answer belongs to Phase 4. Recorded now because it would be easy to mistake "wired in and verified" for "working", and the honest position is that Phase 5's value is **latent** until the cost function is tuned.
 
 ### Judgement calls settled by the lead (workers were instructed to report, not decide)
 
