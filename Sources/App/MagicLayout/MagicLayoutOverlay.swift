@@ -140,11 +140,13 @@ struct MagicPhotoPlan: Identifiable {
 // MARK: - Rationing (Phase 3) - Settings
 
 /// The Settings screen's three-state control for the reveal (spec:
-/// "Rationing - the design, settled 2026-07-28"). `.always` and
-/// `.firstTimeOnly` only differ in what happens AFTER the very first reveal
-/// has played: `.always` keeps showing it (rationed down after the first -
-/// see `MagicLayoutController.RevealTier`), `.firstTimeOnly` stops showing
-/// it at all, same as `.off`. Reduce Motion forces the bypass regardless of
+/// "Rationing - the design, settled 2026-07-28"; REVISED by Justin,
+/// 2026-07-28 evening - see `MagicLayoutController`'s "Rationing" section
+/// below for the full reasoning). `.always` and `.firstTimeOnly` only differ
+/// in what happens AFTER the very first reveal has played: `.always` keeps
+/// showing the SAME full reveal every time (the first-collage-vs-later
+/// split that used to shorten it is gone), `.firstTimeOnly` stops showing it
+/// at all, same as `.off`. Reduce Motion forces the bypass regardless of
 /// this setting (`MagicLayoutController.isDisabled` is checked first in
 /// `begin()`).
 ///
@@ -248,6 +250,18 @@ final class MagicLayoutController {
     // everything from the decision onward runs AFTER the result already
     // exists and is pure addition - that's what `PostResultTiming` below
     // exists to ration.
+    //
+    // REVISED (Justin, 2026-07-28 evening, verbal direction): "everyone
+    // should get the longer show... this is our difference, let's celebrate
+    // it" - the first-collage-vs-later split that used to shrink these
+    // post-result beats on every later collage is GONE. Every reveal (that
+    // plays at all - Settings and Reduce Motion still gate that) now gets
+    // what was previously the first-collage-only "generous" timing. See
+    // `PostResultTiming` below, now a single tuned set rather than two.
+    // Separately, the scan beat's face-glow reveal - the one beat the owner
+    // asked to make deliberately SLOWER, not merely un-shrunk - lives in
+    // `GlowReveal` further down, split out specifically so it is NOT subject
+    // to this struct's covered-work scaling either (see that type's doc).
     private static let arriveDuration = 0.25
     /// Floor on the scan beat: below this the glow reveal is a subliminal
     /// flicker rather than a beat. Only ever costs time when the document was
@@ -258,52 +272,27 @@ final class MagicLayoutController {
     /// going) - what's capped is how long we'd ever wait on our own account.
     private static let scanCap = 0.70
 
-    /// Which tier of `PostResultTiming` a run uses - the "first collage vs
-    /// later" dial (spec: "Rationing - the design, settled 2026-07-28").
-    /// Decided once, in `begin()`, from `MagicLayoutController
-    /// .hasPlayedFullReveal`, and held for the whole run so a value that
-    /// changes mid-flight (there's no path that does today, but there's no
-    /// reason to invite one) can't retroactively alter a beat already
-    /// playing.
-    private enum RevealTier {
-        /// The first-ever reveal: full post-result timing, unrationed by
-        /// tier (dial 1, the covered-work cap below, still applies).
-        case generous
-        /// Every later reveal: the minimum post-result timing that still
-        /// reads as motion.
-        case rationed
-    }
-
-    /// The post-result beats' timings (decide, assemble, settle) for one
-    /// tier - everything from the moment the layout decision is shown
-    /// onward, which the spec's wall-clock measurement identified as the
-    /// ONLY part of the sequence worth rationing (arrive/scan cover real
-    /// work and are untouched). Two independent dials apply on top of
-    /// whichever tier a run picked:
+    /// The post-result beats' timings (decide, assemble, settle) -
+    /// everything from the moment the layout decision is shown onward,
+    /// which the spec's wall-clock measurement identified as the part of
+    /// the sequence that is pure addition (arrive/scan cover real work and
+    /// are untouched, aside from the glow reveal - see `GlowReveal`).
     ///
-    /// 1. Always on: `MagicLayoutController.postResultTiming` scales
-    ///    EVERY field here by how long the covered work (`loadForEditing` +
-    ///    Vision + the decision) actually took, so a fast Vision pass gets a
-    ///    shorter show even within one tier - never hold purely for show
-    ///    when the result is ready.
-    /// 2. First collage vs later: `.generous` vs `.rationed` below.
+    /// REVISED (Justin, 2026-07-28 evening): this used to be TWO tuned sets
+    /// - `.generous` for the first-ever collage, `.rationed` (shorter) for
+    /// every later one. That split is gone: "everyone should get the longer
+    /// show... this is our difference, let's celebrate it." Every reveal
+    /// that plays at all now uses the single set below, unconditionally.
+    /// One dial still applies on top of it: `MagicLayoutController
+    /// .postResultTiming` scales every field here by how long the covered
+    /// work (`loadForEditing` + Vision + the decision) actually took, so a
+    /// fast Vision pass still gets a shorter show than a slow one - never
+    /// hold purely for show when the result is ready. That dial is
+    /// deliberately NOT applied to `GlowReveal`'s fields (see its doc): the
+    /// owner is knowingly overriding that rule for the scan/glow beat
+    /// specifically, so a fast Vision pass must not silently shrink the
+    /// beat he asked to make slower.
     private struct PostResultTiming {
-        /// Per-photo delay in the SCAN beat's staggered glow reveal. This
-        /// technically runs under the "scan" label, but the loop that paces
-        /// it only starts once `completion != nil` - i.e. it structurally
-        /// CANNOT overlap the covered work, unlike the rest of scan - so
-        /// it's pure addition exactly like the fields below, and belongs
-        /// here rather than alongside the free `scanFloor`/`scanCap`
-        /// (measured: at the generous 0.09s/photo it was quietly the
-        /// single largest unrationed cost, ~350ms for a 4-photo pick - the
-        /// same cost the Phase 0 build log named as a lever: "stream Vision
-        /// per photo so boxes light DURING the scan").
-        var glowRevealStagger: Double
-        /// The glow-strength-up animation duration that starts alongside the
-        /// stagger loop above.
-        var glowInDuration: Double
-        /// Each step's reveal animation duration inside the stagger loop.
-        var glowStepDuration: Double
         /// Cap on `waitForResolvedPlans` - a ceiling, not a typical wait (the
         /// canvas rect usually resolves in ~30ms), but a smaller ceiling
         /// keeps a later collage's worst case bounded too.
@@ -340,14 +329,15 @@ final class MagicLayoutController {
         var chromeInDelay: Double
         var chromeInDuration: Double
 
-        /// First-ever collage (spec: "the wow is worth 1.6s exactly once").
-        /// These are Phase 3's original, already-tuned numbers, verbatim -
-        /// the very first reveal a user ever sees is the full show,
-        /// unchanged by rationing existing at all.
+        /// The ONLY set now (spec originally: "the wow is worth 1.6s exactly
+        /// once" - reversed 2026-07-28, "everyone should get the longer
+        /// show"). These are Phase 3's original first-collage numbers,
+        /// verbatim - every reveal that plays now gets what used to be
+        /// reserved for the very first one. The old `.rationed` set (the
+        /// shrunk-down later-collage timing) is deleted outright rather than
+        /// left dead in the file, per instruction: this is a reversal, not a
+        /// fallback to quietly preserve.
         static let generous = PostResultTiming(
-            glowRevealStagger: 0.09,
-            glowInDuration: 0.22,
-            glowStepDuration: 0.18,
             resolveWaitCap: 0.25,
             decideFlareDuration: 0.10,
             decideFadeAnimDuration: 0.22,
@@ -362,41 +352,11 @@ final class MagicLayoutController {
             chromeInDuration: 0.28
         )
 
-        /// Every later collage: the minimum that still reads as motion
-        /// (spec). Tuned so the post-result WAIT total (glowRevealStagger x
-        /// photo count + decideFlare + decideFadeSleep + assembleHold +
-        /// settle, ~0.34s at 4 photos) keeps the measured total near the
-        /// spec's ~1.4s target once combined with the ~1.0s baseline -
-        /// measured (first pass, before this second trim): 1750/1484/1503ms
-        /// total against a 1073ms bypassed baseline, i.e. ~500ms over
-        /// target. See the timing table in the report for the number this
-        /// pass actually landed.
-        static let rationed = PostResultTiming(
-            glowRevealStagger: 0.015,
-            glowInDuration: 0.08,
-            glowStepDuration: 0.06,
-            resolveWaitCap: 0.10,
-            decideFlareDuration: 0.04,
-            decideFadeAnimDuration: 0.08,
-            decideFadeSleepDuration: 0.04,
-            assembleDuration: 0.18,
-            assembleHold: 0.10,
-            photoCrossfadeDuration: 0.10,
-            settleDuration: 0.10,
-            glowOutDelay: 0.02,
-            glowOutDuration: 0.08,
-            chromeInDelay: 0.05,
-            chromeInDuration: 0.08
-        )
-
         /// Dial 1: every field scaled by the same factor, so the beats'
         /// internal proportions (e.g. the fade-anim/fade-sleep bleed) hold
         /// regardless of how much the covered work compressed them.
         func scaled(by factor: Double) -> PostResultTiming {
             PostResultTiming(
-                glowRevealStagger: glowRevealStagger * factor,
-                glowInDuration: glowInDuration * factor,
-                glowStepDuration: glowStepDuration * factor,
                 resolveWaitCap: resolveWaitCap * factor,
                 decideFlareDuration: decideFlareDuration * factor,
                 decideFadeAnimDuration: decideFadeAnimDuration * factor,
@@ -413,17 +373,66 @@ final class MagicLayoutController {
         }
     }
 
-    /// What the tier's numbers above were tuned against: roughly what
-    /// `loadForEditing` + Vision + the decision take on the covered-work path
-    /// they're meant to hide behind. A run whose covered work finished
-    /// faster than this scales every post-result beat down proportionally
-    /// (dial 1); a run that took longer never gets MORE than the tier's own
-    /// numbers (scale is capped at 1) - "never hold purely for show when the
-    /// result is ready" cuts both ways.
+    /// Fixed timing for the scan beat's per-FACE glow reveal (Justin,
+    /// 2026-07-28: "we need to slow this down and make it more obvious.
+    /// Really celebrate it" / "spend the extra time showing MORE, not
+    /// waiting longer"). Deliberately its own type, separate from
+    /// `PostResultTiming`, for two reasons:
+    ///
+    /// 1. It is NOT subject to dial 1 (`PostResultTiming.scaled(by:)`). The
+    ///    owner is knowingly overriding "never hold purely for show when the
+    ///    result is ready" for exactly this beat - he is willing to pay a
+    ///    full extra second so the face-detection beat reads as causally
+    ///    connected to the layout that follows. Scaling it down whenever
+    ///    Vision comes back quickly (which is the common case on-device,
+    ///    unlike the simulator's CPU fallback) would silently undo the
+    ///    override the moment it mattered most.
+    /// 2. It only ever runs when `glowsEnabled` - a faceless/landscape set
+    ///    takes the degrade path before this code is reached at all, so it
+    ///    never pays for a beat with nothing to show (spec's "never
+    ///    advertise a miss", now doubly true: nothing to advertise, nothing
+    ///    to wait for either).
+    ///
+    /// The reveal is keyed to individual FACES, not photos: `run()` flattens
+    /// every surviving face across all photos into one ordered sequence
+    /// (photo order, then face order within a photo) and lights them one at
+    /// a time, so a photo with several faces reads as "found... found...
+    /// found" exactly like four single-face photos would, rather than
+    /// popping in as one block per photo (Phase 3's original behavior).
+    private enum GlowReveal {
+        /// Gap between consecutive faces lighting, before the span cap below
+        /// compresses it.
+        static let stagger = 0.22
+        /// Each face's own fade-in, once its turn arrives - long enough to
+        /// register as a discrete "found", not a flicker.
+        static let stepDuration = 0.22
+        /// The shared brightness envelope's very first rise (see
+        /// `MagicLayoutOverlay.glowStrength(for:)` - gates on a PLAN's first
+        /// face lighting), kept close to `stepDuration` so the first face
+        /// doesn't look slower to arrive than the rest.
+        static let inDuration = 0.24
+        /// Ceiling on the total stagger WALK (first face lighting to last),
+        /// regardless of how many faces were detected - a busy group shot
+        /// compresses the per-face gap rather than ballooning past this.
+        static let maxStaggerSpan = 1.15
+        /// Held AFTER the last face lights, before the decide flare - the
+        /// beat the owner asked for explicitly: a moment to register "found
+        /// N faces" as a settled fact, not just the last flicker of a loop.
+        static let postHoldDuration = 0.35
+    }
+
+    /// What `PostResultTiming.generous`'s numbers were tuned against:
+    /// roughly what `loadForEditing` + Vision + the decision take on the
+    /// covered-work path they're meant to hide behind. A run whose covered
+    /// work finished faster than this scales every post-result beat down
+    /// proportionally (dial 1); a run that took longer never gets MORE than
+    /// the tuned numbers (scale is capped at 1) - "never hold purely for
+    /// show when the result is ready" cuts both ways. Does NOT apply to
+    /// `GlowReveal` - see its doc for why that beat is deliberately exempt.
     private static let referenceCoveredWork = 1.0
-    /// Floor on dial 1's scale: a beat that shrank below half its tier's
-    /// designed length stops reading as motion at all, so the covered-work
-    /// cap never pushes a run past this regardless of how fast the work was.
+    /// Floor on dial 1's scale: a beat that shrank below half its designed
+    /// length stops reading as motion at all, so the covered-work cap never
+    /// pushes a run past this regardless of how fast the work was.
     private static let minPostResultScale = 0.5
 
     private(set) var beat: Beat = .idle
@@ -446,7 +455,12 @@ final class MagicLayoutController {
     private(set) var overlayOpacity: Double = 0
     /// 0...1 sweep position for the scan beat's travelling band.
     private(set) var sweep: Double = 0
-    /// How many photos have had their glows lit so far (staggered reveal).
+    /// How many individual FACES have had their glows lit so far, out of
+    /// the flattened per-face reveal order `run()` walks (photo order, then
+    /// face order within a photo - see `GlowReveal`). Revised 2026-07-28
+    /// from a per-PHOTO counter: a photo with several faces used to light
+    /// them all as one block, which undersold a group shot exactly where
+    /// the "found... found... found" story is most worth telling.
     private(set) var revealedGlows = 0
     /// False whenever detection is too weak to be worth advertising - see
     /// `shouldRevealGlows`. Never advertise a miss.
@@ -523,18 +537,16 @@ final class MagicLayoutController {
     /// landing" half. 0 until the document lands, which is also the safe
     /// "don't scale" default `postResultTiming` reads.
     private(set) var coveredWorkDuration: Double = 0
-    /// This run's tier (dial 2), fixed at `begin()`.
-    private var tier: RevealTier = .rationed
 
-    /// The actual timing this run's decide/assemble/settle beats use: the
-    /// tier's numbers (dial 2), scaled by how long the covered work actually
-    /// took (dial 1). Computed fresh rather than cached because
-    /// `coveredWorkDuration` is still 0 the instant `documentReady` fires
-    /// (set in the same call) and only becomes final once the scan beat's
-    /// wait loop has observed it - by the time `run()` reaches the decide
-    /// beat this is stable.
+    /// The actual timing this run's decide/assemble/settle beats use:
+    /// `PostResultTiming.generous` - the only set there is now - scaled by
+    /// how long the covered work actually took (dial 1, still live).
+    /// Computed fresh rather than cached because `coveredWorkDuration` is
+    /// still 0 the instant `documentReady` fires (set in the same call) and
+    /// only becomes final once the scan beat's wait loop has observed it -
+    /// by the time `run()` reaches the decide beat this is stable.
     private var postResultTiming: PostResultTiming {
-        let base = tier == .generous ? PostResultTiming.generous : PostResultTiming.rationed
+        let base = PostResultTiming.generous
         guard coveredWorkDuration > 0 else { return base }
         let scale = min(1, max(Self.minPostResultScale, coveredWorkDuration / Self.referenceCoveredWork))
         return base.scaled(by: scale)
@@ -555,13 +567,14 @@ final class MagicLayoutController {
         return UIAccessibility.isReduceMotionEnabled
     }
 
-    /// True once the full (generous) reveal has ever played to completion,
-    /// UNSKIPPED, on this device - set exactly once, at the bottom of
-    /// `run()`'s natural (non-cancelled) path. Drives both rationing dials:
-    /// which tier a NEW reveal gets (`RevealTier.generous` vs `.rationed`,
-    /// in `begin()`) and, under `MagicRevealPreference.firstTimeOnly`,
-    /// whether a reveal plays again AT ALL. Plain `UserDefaults` for the
-    /// same reason as `MagicRevealPreference` above.
+    /// True once the reveal has ever played to completion, UNSKIPPED, on
+    /// this device - set exactly once, at the bottom of `run()`'s natural
+    /// (non-cancelled) path. Every reveal is now the same (formerly
+    /// "generous") show, so this flag's only remaining job is
+    /// `MagicRevealPreference.firstTimeOnly`: whether a reveal plays again AT
+    /// ALL. (It used to also pick a run's tier; that dial is gone - see the
+    /// "Rationing" revision above `PostResultTiming`.) Plain `UserDefaults`
+    /// for the same reason as `MagicRevealPreference` above.
     private static let hasPlayedFullRevealDefaultsKey = "magicLayoutHasPlayedFullReveal"
     static var hasPlayedFullReveal: Bool {
         get { UserDefaults.standard.bool(forKey: hasPlayedFullRevealDefaultsKey) }
@@ -612,11 +625,6 @@ final class MagicLayoutController {
         glowsEnabled = false
         morphProgress = 0
         sweep = 0
-        // Dial 2 - fixed for the whole run. `preference == .firstTimeOnly`
-        // only ever reaches here when `hasPlayedFullReveal` is false (the
-        // guard above returns otherwise), so that preference always gets
-        // `.generous` - the one reveal it ever shows is the full one.
-        tier = Self.hasPlayedFullReveal ? .rationed : .generous
         beginTime = CFAbsoluteTimeGetCurrent()
         coveredWorkDuration = 0
         scrim = 0
@@ -786,17 +794,14 @@ final class MagicLayoutController {
 
         // Everything from here on structurally runs AFTER the document
         // exists - the "after the result already exists" half of the spec's
-        // measurement, the only part worth rationing. Resolved once, now,
-        // rather than read live off `postResultTiming` at each step:
-        // `coveredWorkDuration` is stable the instant the wait loop above
-        // exits (`documentReady` set it synchronously before `completion`
-        // itself), and a single snapshot keeps this run's pacing internally
-        // consistent even if something odd raced the computed property.
-        // This is ALSO why the glow-reveal stagger below (part of the "scan"
-        // label, but downstream of this same exit point) is a
-        // `PostResultTiming` field rather than living next to the free
-        // `scanFloor`/`scanCap` above - it cannot overlap covered work
-        // either.
+        // measurement. Resolved once, now, rather than read live off
+        // `postResultTiming` at each step: `coveredWorkDuration` is stable
+        // the instant the wait loop above exits (`documentReady` set it
+        // synchronously before `completion` itself), and a single snapshot
+        // keeps this run's pacing internally consistent even if something
+        // odd raced the computed property. (The glow-reveal stagger just
+        // below is deliberately NOT part of `timing` - it reads `GlowReveal`
+        // instead, fixed and unscaled - see that type's doc for why.)
         let timing = postResultTiming
 
         // `documentReady` just ran `rebuildPlans()` synchronously, almost
@@ -809,24 +814,39 @@ final class MagicLayoutController {
         await waitForResolvedPlans(cap: timing.resolveWaitCap)
         guard !Task.isCancelled else { return }
 
-        // Real glows on real detections, staggered so they read as "found,
-        // then found, then found" rather than appearing as one block. Skipped
+        // Real glows on real detections, staggered PER FACE (2026-07-28
+        // revision - see `GlowReveal`) so they read as "found, then found,
+        // then found" rather than appearing as one block per photo. Skipped
         // wholesale when detection is weak (never advertise a miss) - or when
         // destinations never resolved at all, in which case `glowsEnabled`
-        // is still sitting at its safe `begin()` default, `false`.
-        if glowsEnabled {
-            withAnimation(.easeOut(duration: Self.scaled(timing.glowInDuration))) { glowStrength = 1 }
-            for _ in photos.indices {
+        // is still sitting at its safe `begin()` default, `false`. This is
+        // also, deliberately, the one beat the owner asked to make slower
+        // rather than merely un-rationed - "spend the extra time showing
+        // MORE, not waiting longer" - so the span below is a real walk
+        // across individual faces plus a hold, not a sleep for its own sake.
+        let totalGlowFaces = photos.reduce(0) { $0 + $1.faces.count }
+        if glowsEnabled, totalGlowFaces > 0 {
+            MagicTiming.mark("glow reveal begin (\(totalGlowFaces) faces)")
+            withAnimation(.easeOut(duration: Self.scaled(GlowReveal.inDuration))) { glowStrength = 1 }
+            let span = min(GlowReveal.stagger * Double(max(totalGlowFaces - 1, 0)), GlowReveal.maxStaggerSpan)
+            let perFaceGap = totalGlowFaces > 1 ? span / Double(totalGlowFaces - 1) : 0
+            for _ in 0..<totalGlowFaces {
                 guard !Task.isCancelled else { return }
-                withAnimation(.easeOut(duration: Self.scaled(timing.glowStepDuration))) { revealedGlows += 1 }
-                await sleep(timing.glowRevealStagger)
+                withAnimation(.easeOut(duration: Self.scaled(GlowReveal.stepDuration))) { revealedGlows += 1 }
+                await sleep(perFaceGap)
             }
+            // The consolidation beat: hold on "found N faces" before the
+            // decide flare erases the count by turning every glow into one
+            // undifferentiated flare.
+            await sleep(GlowReveal.postHoldDuration)
+            MagicTiming.mark("glow reveal end")
+            guard !Task.isCancelled else { return }
         }
         // The floor, measured from the START of the scan beat, so slow work
         // pays nothing for it. Unrationed (arrive/scan's own floor, not a
-        // `PostResultTiming` field) - it only ever engages when the document
-        // arrived faster than the floor itself, which the tier split above
-        // doesn't change.
+        // `PostResultTiming` field) - only engages when the document arrived
+        // faster than the floor itself; irrelevant whenever the glow walk
+        // above already ran longer, which it now usually does.
         let elapsed = CFAbsoluteTimeGetCurrent() - scanStart
         if elapsed < Self.scanFloor {
             await sleep(Self.scanFloor - elapsed)
@@ -920,10 +940,9 @@ final class MagicLayoutController {
         // task, which returns out of every `guard !Task.isCancelled` above
         // before ever reaching here) - so this is exactly "the full reveal
         // played, to completion, and the user actually saw it", which is
-        // what both rationing dials key off of for every later run.
-        if tier == .generous {
-            Self.hasPlayedFullReveal = true
-        }
+        // what `MagicRevealPreference.firstTimeOnly` keys off of to decide
+        // whether a later reveal plays at all.
+        Self.hasPlayedFullReveal = true
         finish()
     }
 
@@ -934,6 +953,14 @@ final class MagicLayoutController {
     /// Every `withAnimation` duration goes through here so `-magicSlow`
     /// stretches the visible motion and the beat sleeps by the same factor.
     private static func scaled(_ seconds: Double) -> Double { seconds * timeScale }
+
+    /// `GlowReveal.stepDuration`, pre-scaled by `-magicSlow` - exposed
+    /// (rather than `timeScale` itself, which is private) so
+    /// `MagicLayoutOverlay`'s renderer can give each individual face's own
+    /// `.animation(value:)` the SAME duration the stagger loop in `run()`
+    /// paces by, without duplicating the debug time-scale logic on the view
+    /// side.
+    var faceGlowStepDuration: Double { Self.scaled(GlowReveal.stepDuration) }
 
     // MARK: - Plan resolution
 
@@ -1221,7 +1248,9 @@ struct MagicLayoutOverlay: View {
                             plan: plan,
                             originFix: originFix,
                             photoOpacity: controller.overlayOpacity,
-                            glowStrength: glowStrength(for: plan)
+                            glowStrength: glowStrength(for: plan),
+                            revealedFaceMask: revealedFaceMask(for: plan),
+                            faceRevealStepDuration: controller.faceGlowStepDuration
                         )
                     }
                     if controller.beat == .scan {
@@ -1229,8 +1258,10 @@ struct MagicLayoutOverlay: View {
                             .opacity(controller.overlayOpacity)
                     }
                     if controller.decideFlash > 0 {
+                        // 0.13 -> 0.17 (2026-07-28, "really celebrate it"):
+                        // a touch more wash at the moment the layout lands.
                         Color.mosaicAccent
-                            .opacity(0.13 * controller.decideFlash)
+                            .opacity(0.17 * controller.decideFlash)
                             .blendMode(.plusLighter)
                             .ignoresSafeArea()
                             .allowsHitTesting(false)
@@ -1249,17 +1280,49 @@ struct MagicLayoutOverlay: View {
         .ignoresSafeArea()
     }
 
-    /// A photo's glow strength: 0 until its turn in the staggered reveal
-    /// arrives, then the controller's master `glowStrength` - which stays lit
+    /// A photo's shared brightness ENVELOPE: 0 until the FIRST of its faces
+    /// lights, then the controller's master `glowStrength` - which stays lit
     /// through the decision flare AND the entire flight, and only burns down
     /// at the handoff. (Phase 0 wiped the boxes over the first 40% of the
     /// morph, which dropped the causal claim exactly when the motion was
-    /// making it.)
+    /// making it.) This is the SWELL/FLARE/BURN-DOWN curve shared by every
+    /// already-revealed face in the plan; which INDIVIDUAL faces have
+    /// started revealing at all is a separate, per-face question - see
+    /// `revealedFaceMask(for:)`.
     private func glowStrength(for plan: MagicPhotoPlan) -> Double {
         guard controller.glowsEnabled, !plan.faces.isEmpty else { return 0 }
-        guard let index = controller.photos.firstIndex(where: { $0.id == plan.id }) else { return 0 }
-        guard index < controller.revealedGlows else { return 0 }
+        guard flatFaceIndex(planID: plan.id, faceIndex: 0) < controller.revealedGlows else { return 0 }
         return controller.glowStrength
+    }
+
+    /// Per-face reveal gate, parallel to `plan.faces`: true once THIS face's
+    /// slot in the flattened per-face stagger order (`run()`'s loop, photo
+    /// order then face order within a photo) has been reached. Consumed by
+    /// `MorphingPhotoView.faceGlows`, which fades each face in independently
+    /// via its own `.animation(value:)` rather than through the shared
+    /// `glowStrength` envelope above - that's what produces "found... found
+    /// ... found" for faces sharing one photo, not just faces across
+    /// different photos.
+    private func revealedFaceMask(for plan: MagicPhotoPlan) -> [Bool] {
+        guard controller.glowsEnabled else { return Array(repeating: false, count: plan.faces.count) }
+        let base = flatFaceIndex(planID: plan.id, faceIndex: 0)
+        return plan.faces.indices.map { base + $0 < controller.revealedGlows }
+    }
+
+    /// A face's position in the flattened (photo order, then face order
+    /// within a photo) reveal sequence `run()`'s stagger loop counts
+    /// against - the two must agree exactly on ordering, or a face's mask
+    /// bit would flip out of step with the loop that's supposedly lighting
+    /// it. Bounded by the 2-4 photo cap and a handful of faces each, so a
+    /// linear scan per call (called per rendered face, every frame the
+    /// reveal is progressing) is cheap.
+    private func flatFaceIndex(planID: PhotoID, faceIndex: Int) -> Int {
+        var count = 0
+        for p in controller.photos {
+            if p.id == planID { return count + faceIndex }
+            count += p.faces.count
+        }
+        return count + faceIndex
     }
 
     /// The decision made visible: the chosen template's cells, drawn as empty
@@ -1353,8 +1416,24 @@ private struct MorphingPhotoView: View, Animatable {
     /// can dissolve the photo into the editor's identical one underneath
     /// while the glow keeps burning over the live result for a beat.
     var photoOpacity: Double
-    /// 0 unlit, ~1 burning, ~2.1 at the decision flare.
+    /// 0 unlit, ~1 burning, ~2.1 at the decision flare. Shared by every
+    /// ALREADY-REVEALED face in this plan - the swell/flare/burn-down
+    /// envelope, not the individual reveal-in (see `revealedFaceMask`).
     var glowStrength: Double
+    /// Parallel to `plan.faces`: which individual faces have reached their
+    /// turn in the flattened per-face stagger (`MagicLayoutController.run()`
+    /// / `MagicLayoutOverlay.revealedFaceMask(for:)`). Deliberately NOT part
+    /// of `animatableData` below - each face fades itself in independently
+    /// via its own `.animation(value:)` inside `faceGlows`, which works
+    /// correctly whether or not this view's outer Animatable interpolation
+    /// happens to be mid-frame for `progress`/`glowStrength` at the same
+    /// moment, because that per-face animation is keyed off its own value
+    /// transition, not off this struct's frame-by-frame data.
+    let revealedFaceMask: [Bool]
+    /// `GlowReveal.stepDuration`, already `-magicSlow`-scaled - handed down
+    /// from the controller (see its doc) so each face's own fade-in below
+    /// runs at the same pace the stagger loop paces by.
+    let faceRevealStepDuration: Double
 
     /// All THREE animated scalars ride in `animatableData`, not just the
     /// morph. A custom `Animatable` view interpolates only what it declares
@@ -1430,11 +1509,19 @@ private struct MorphingPhotoView: View, Animatable {
     /// Both the opacity and the blur radius scale with `glowStrength`, which
     /// is what makes the decision beat's flare read as the halo SWELLING
     /// rather than merely brightening.
+    ///
+    /// REVISED (Justin, 2026-07-28: "we need to slow this down and make it
+    /// more obvious. Really celebrate it"): every layer's width/opacity/blur
+    /// was turned up from Phase 0's numbers, and each face now fades in and
+    /// pops to its full size INDEPENDENTLY - gated by `revealedFaceMask`,
+    /// not by the plan-wide `glowStrength` envelope alone - so a photo with
+    /// several faces still reads as a sequence of individual "founds" rather
+    /// than one block lighting at once.
     private func faceGlows(imageOrigin: CGPoint, frameSize: CGSize) -> some View {
         let strength = min(glowStrength, 2.2)
         let bloom = min(1.0, strength)          // opacity ramp, saturates at 1
         let flare = max(0, strength - 1)        // extra energy above "lit"
-        return ForEach(Array(plan.faces.enumerated()), id: \.offset) { _, face in
+        return ForEach(Array(plan.faces.enumerated()), id: \.offset) { index, face in
             let box = CGRect(
                 x: imageOrigin.x + face.minX * frameSize.width,
                 y: imageOrigin.y + face.minY * frameSize.height,
@@ -1442,25 +1529,33 @@ private struct MorphingPhotoView: View, Animatable {
                 height: face.height * frameSize.height
             )
             let corner = min(box.width, box.height) * 0.16
+            let revealed = index < revealedFaceMask.count && revealedFaceMask[index]
             ZStack {
-                RoundedRectangle(cornerRadius: corner + 4, style: .continuous)
-                    .strokeBorder(Color.mosaicAccent, lineWidth: 6 + 5 * flare)
-                    .blur(radius: 9 + 7 * flare)
-                    .opacity(0.42 * bloom + 0.30 * flare)
-                    .scaleEffect(1 + 0.06 * flare)
+                RoundedRectangle(cornerRadius: corner + 5, style: .continuous)
+                    .strokeBorder(Color.mosaicAccent, lineWidth: 8 + 6 * flare)
+                    .blur(radius: 11 + 8 * flare)
+                    .opacity(0.55 * bloom + 0.35 * flare)
+                    .scaleEffect(1 + 0.08 * flare)
                 RoundedRectangle(cornerRadius: corner + 2, style: .continuous)
-                    .strokeBorder(Color.mosaicAccent, lineWidth: 3)
-                    .blur(radius: 3.5)
-                    .opacity(0.75 * bloom + 0.25 * flare)
+                    .strokeBorder(Color.mosaicAccent, lineWidth: 4)
+                    .blur(radius: 4)
+                    .opacity(0.85 * bloom + 0.30 * flare)
                 RoundedRectangle(cornerRadius: corner, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.85), lineWidth: 1)
+                    .strokeBorder(Color.white.opacity(0.9), lineWidth: 1.5)
                     .blur(radius: 0.4)
-                    .opacity(0.55 * bloom + 0.45 * flare)
+                    .opacity(0.65 * bloom + 0.5 * flare)
             }
             .compositingGroup()
             .blendMode(.plusLighter)
             .frame(width: box.width, height: box.height)
             .position(x: box.midX, y: box.midY)
+            // The individual "found" pop: each face arrives on its own,
+            // scaling up from just under full size as it fades in, rather
+            // than every face in a photo snapping to full brightness at
+            // once the instant the plan's shared envelope turns on.
+            .opacity(revealed ? 1 : 0)
+            .scaleEffect(revealed ? 1 : 0.8)
+            .animation(.easeOut(duration: faceRevealStepDuration), value: revealed)
         }
     }
 
