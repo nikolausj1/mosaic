@@ -137,6 +137,54 @@ struct MagicPhotoPlan: Identifiable {
     var faces: [CGRect]
 }
 
+// MARK: - Rationing (Phase 3) - Settings
+
+/// The Settings screen's three-state control for the reveal (spec:
+/// "Rationing - the design, settled 2026-07-28"). `.always` and
+/// `.firstTimeOnly` only differ in what happens AFTER the very first reveal
+/// has played: `.always` keeps showing it (rationed down after the first -
+/// see `MagicLayoutController.RevealTier`), `.firstTimeOnly` stops showing
+/// it at all, same as `.off`. Reduce Motion forces the bypass regardless of
+/// this setting (`MagicLayoutController.isDisabled` is checked first in
+/// `begin()`).
+///
+/// Persisted the way this codebase already persists a preference that an
+/// `@Observable` class also needs to read - plain `UserDefaults`, not
+/// `@AppStorage` (see `EditorState.lastBorderThicknessDefaultsKey`'s comment
+/// for why: composing `@AppStorage` with `@Observable`'s own storage isn't
+/// supported, and `MagicLayoutController` is `@Observable` and is exactly
+/// what needs to read this at `begin()`).
+enum MagicRevealPreference: String, CaseIterable, Identifiable {
+    case always
+    case firstTimeOnly
+    case off
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .always: return "Always"
+        case .firstTimeOnly: return "First time only"
+        case .off: return "Off"
+        }
+    }
+
+    static let defaultsKey = "magicLayoutRevealPreference"
+
+    /// Defaults to `.always` - the feature ships on, matching every other
+    /// path through this file, which plays unless something opts it out.
+    static var current: MagicRevealPreference {
+        get {
+            guard
+                let raw = UserDefaults.standard.string(forKey: defaultsKey),
+                let value = MagicRevealPreference(rawValue: raw)
+            else { return .always }
+            return value
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey) }
+    }
+}
+
 // MARK: - Controller
 
 /// The beat machine. Owned by `ContentView`, driven by three events:
@@ -191,14 +239,15 @@ final class MagicLayoutController {
     }()
 
     // Beat timings, in seconds. Phase 0 used the spec's Phase 3 numbers
-    // verbatim and measured ~1.4s of added wall clock against the spinner.
-    // The decision beat below is NEW time, so it is paid for out of the
-    // beats either side of it rather than added on top: the scan floor comes
-    // down (the glows now have the decide beat to breathe into, so they no
-    // longer need a long scan to register), the assemble comes down to the
-    // 450-500ms the Phase 0 build log already identified as a lever, and the
-    // settle's own crossfade starts while the last few frames of the morph
-    // are still running (see `assembleHold`).
+    // verbatim and measured ~1.4s of added wall clock against the spinner;
+    // Phase 3's own decide beat grew that to ~1.66s (build log,
+    // 2026-07-28). The beats below are split into two groups because the
+    // measurement was: arrive and scan sit ON TOP of `loadForEditing` +
+    // Vision + the decision (they are free, and are NOT rationed - see
+    // `arriveDuration`/`scanFloor`/`scanCap` immediately below), while
+    // everything from the decision onward runs AFTER the result already
+    // exists and is pure addition - that's what `PostResultTiming` below
+    // exists to ration.
     private static let arriveDuration = 0.25
     /// Floor on the scan beat: below this the glow reveal is a subliminal
     /// flicker rather than a beat. Only ever costs time when the document was
@@ -208,27 +257,174 @@ final class MagicLayoutController {
     /// than this when the work genuinely takes longer (the sweep just keeps
     /// going) - what's capped is how long we'd ever wait on our own account.
     private static let scanCap = 0.70
-    /// Dead time held for the decision beat. The flare it starts resolves
-    /// over ~220ms, i.e. into the first frames of the assemble - the beat
-    /// hands off mid-gesture rather than coming to a full stop first.
-    private static let decideDuration = 0.26
-    private static let assembleDuration = 0.50
-    /// How long the sequence actually WAITS on the morph before starting the
-    /// settle. Deliberately shorter than the morph itself: at 88% of this
-    /// timing curve the photos are within a pixel or two of the destination
-    /// the editor underneath is already drawing them at, so beginning the
-    /// crossfade there is invisible and buys back 60ms.
-    private static let assembleHold = 0.44
-    /// Settle sub-beats, all measured from the start of the settle:
-    /// photo-layer crossfade (0 -> 0.24), glow/slot burn-down (0.08 -> 0.34),
-    /// editor affordances arriving (0.22 -> 0.50). The stagger is the point:
-    /// the theater is visibly LEAVING as the controls visibly ARRIVE, so the
-    /// end of the sequence reads as a handoff rather than a cut.
-    private static let settleDuration = 0.46
-    private static let glowOutDelay = 0.08
-    private static let glowOutDuration = 0.26
-    private static let chromeInDelay = 0.22
-    private static let chromeInDuration = 0.28
+
+    /// Which tier of `PostResultTiming` a run uses - the "first collage vs
+    /// later" dial (spec: "Rationing - the design, settled 2026-07-28").
+    /// Decided once, in `begin()`, from `MagicLayoutController
+    /// .hasPlayedFullReveal`, and held for the whole run so a value that
+    /// changes mid-flight (there's no path that does today, but there's no
+    /// reason to invite one) can't retroactively alter a beat already
+    /// playing.
+    private enum RevealTier {
+        /// The first-ever reveal: full post-result timing, unrationed by
+        /// tier (dial 1, the covered-work cap below, still applies).
+        case generous
+        /// Every later reveal: the minimum post-result timing that still
+        /// reads as motion.
+        case rationed
+    }
+
+    /// The post-result beats' timings (decide, assemble, settle) for one
+    /// tier - everything from the moment the layout decision is shown
+    /// onward, which the spec's wall-clock measurement identified as the
+    /// ONLY part of the sequence worth rationing (arrive/scan cover real
+    /// work and are untouched). Two independent dials apply on top of
+    /// whichever tier a run picked:
+    ///
+    /// 1. Always on: `MagicLayoutController.postResultTiming` scales
+    ///    EVERY field here by how long the covered work (`loadForEditing` +
+    ///    Vision + the decision) actually took, so a fast Vision pass gets a
+    ///    shorter show even within one tier - never hold purely for show
+    ///    when the result is ready.
+    /// 2. First collage vs later: `.generous` vs `.rationed` below.
+    private struct PostResultTiming {
+        /// Per-photo delay in the SCAN beat's staggered glow reveal. This
+        /// technically runs under the "scan" label, but the loop that paces
+        /// it only starts once `completion != nil` - i.e. it structurally
+        /// CANNOT overlap the covered work, unlike the rest of scan - so
+        /// it's pure addition exactly like the fields below, and belongs
+        /// here rather than alongside the free `scanFloor`/`scanCap`
+        /// (measured: at the generous 0.09s/photo it was quietly the
+        /// single largest unrationed cost, ~350ms for a 4-photo pick - the
+        /// same cost the Phase 0 build log named as a lever: "stream Vision
+        /// per photo so boxes light DURING the scan").
+        var glowRevealStagger: Double
+        /// The glow-strength-up animation duration that starts alongside the
+        /// stagger loop above.
+        var glowInDuration: Double
+        /// Each step's reveal animation duration inside the stagger loop.
+        var glowStepDuration: Double
+        /// Cap on `waitForResolvedPlans` - a ceiling, not a typical wait (the
+        /// canvas rect usually resolves in ~30ms), but a smaller ceiling
+        /// keeps a later collage's worst case bounded too.
+        var resolveWaitCap: Double
+        /// The decide beat's first half: the flare-up. Also how long `run()`
+        /// sleeps before starting the fade-back (the two are equal by
+        /// design - the flare holds exactly as long as it takes to read).
+        var decideFlareDuration: Double
+        /// The decide beat's fade-back ANIMATION duration - deliberately
+        /// longer than `decideFadeSleepDuration` below so the ease bleeds
+        /// into the first frames of assemble rather than coming to a full
+        /// stop first (spec/build-log: "the beat hands off mid-gesture").
+        var decideFadeAnimDuration: Double
+        /// How long `run()` actually WAITS during the fade-back before
+        /// moving on to assemble.
+        var decideFadeSleepDuration: Double
+        /// The morph's animation duration.
+        var assembleDuration: Double
+        /// How long the sequence actually WAITS on the morph before
+        /// starting the settle. Deliberately shorter than the morph itself:
+        /// near the end of this timing curve the photos are within a pixel
+        /// or two of the destination the editor underneath is already
+        /// drawing them at, so beginning the crossfade there is invisible.
+        var assembleHold: Double
+        /// Settle's photo-layer crossfade animation duration (the overlay's
+        /// photos dissolving onto the editor's identical ones underneath).
+        var photoCrossfadeDuration: Double
+        /// Settle's total held time. Sub-beats below are measured from the
+        /// start of settle; the stagger is the point - the theater is
+        /// visibly LEAVING as the controls visibly ARRIVE.
+        var settleDuration: Double
+        var glowOutDelay: Double
+        var glowOutDuration: Double
+        var chromeInDelay: Double
+        var chromeInDuration: Double
+
+        /// First-ever collage (spec: "the wow is worth 1.6s exactly once").
+        /// These are Phase 3's original, already-tuned numbers, verbatim -
+        /// the very first reveal a user ever sees is the full show,
+        /// unchanged by rationing existing at all.
+        static let generous = PostResultTiming(
+            glowRevealStagger: 0.09,
+            glowInDuration: 0.22,
+            glowStepDuration: 0.18,
+            resolveWaitCap: 0.25,
+            decideFlareDuration: 0.10,
+            decideFadeAnimDuration: 0.22,
+            decideFadeSleepDuration: 0.16,
+            assembleDuration: 0.50,
+            assembleHold: 0.44,
+            photoCrossfadeDuration: 0.24,
+            settleDuration: 0.46,
+            glowOutDelay: 0.08,
+            glowOutDuration: 0.26,
+            chromeInDelay: 0.22,
+            chromeInDuration: 0.28
+        )
+
+        /// Every later collage: the minimum that still reads as motion
+        /// (spec). Tuned so the post-result WAIT total (glowRevealStagger x
+        /// photo count + decideFlare + decideFadeSleep + assembleHold +
+        /// settle, ~0.34s at 4 photos) keeps the measured total near the
+        /// spec's ~1.4s target once combined with the ~1.0s baseline -
+        /// measured (first pass, before this second trim): 1750/1484/1503ms
+        /// total against a 1073ms bypassed baseline, i.e. ~500ms over
+        /// target. See the timing table in the report for the number this
+        /// pass actually landed.
+        static let rationed = PostResultTiming(
+            glowRevealStagger: 0.015,
+            glowInDuration: 0.08,
+            glowStepDuration: 0.06,
+            resolveWaitCap: 0.10,
+            decideFlareDuration: 0.04,
+            decideFadeAnimDuration: 0.08,
+            decideFadeSleepDuration: 0.04,
+            assembleDuration: 0.18,
+            assembleHold: 0.10,
+            photoCrossfadeDuration: 0.10,
+            settleDuration: 0.10,
+            glowOutDelay: 0.02,
+            glowOutDuration: 0.08,
+            chromeInDelay: 0.05,
+            chromeInDuration: 0.08
+        )
+
+        /// Dial 1: every field scaled by the same factor, so the beats'
+        /// internal proportions (e.g. the fade-anim/fade-sleep bleed) hold
+        /// regardless of how much the covered work compressed them.
+        func scaled(by factor: Double) -> PostResultTiming {
+            PostResultTiming(
+                glowRevealStagger: glowRevealStagger * factor,
+                glowInDuration: glowInDuration * factor,
+                glowStepDuration: glowStepDuration * factor,
+                resolveWaitCap: resolveWaitCap * factor,
+                decideFlareDuration: decideFlareDuration * factor,
+                decideFadeAnimDuration: decideFadeAnimDuration * factor,
+                decideFadeSleepDuration: decideFadeSleepDuration * factor,
+                assembleDuration: assembleDuration * factor,
+                assembleHold: assembleHold * factor,
+                photoCrossfadeDuration: photoCrossfadeDuration * factor,
+                settleDuration: settleDuration * factor,
+                glowOutDelay: glowOutDelay * factor,
+                glowOutDuration: glowOutDuration * factor,
+                chromeInDelay: chromeInDelay * factor,
+                chromeInDuration: chromeInDuration * factor
+            )
+        }
+    }
+
+    /// What the tier's numbers above were tuned against: roughly what
+    /// `loadForEditing` + Vision + the decision take on the covered-work path
+    /// they're meant to hide behind. A run whose covered work finished
+    /// faster than this scales every post-result beat down proportionally
+    /// (dial 1); a run that took longer never gets MORE than the tier's own
+    /// numbers (scale is capped at 1) - "never hold purely for show when the
+    /// result is ready" cuts both ways.
+    private static let referenceCoveredWork = 1.0
+    /// Floor on dial 1's scale: a beat that shrank below half its tier's
+    /// designed length stops reading as motion at all, so the covered-work
+    /// cap never pushes a run past this regardless of how fast the work was.
+    private static let minPostResultScale = 0.5
 
     private(set) var beat: Beat = .idle
     var isActive: Bool { beat != .idle }
@@ -318,6 +514,32 @@ final class MagicLayoutController {
     /// its generators prepared).
     private let decisionHaptic = UIImpactFeedbackGenerator(style: .soft)
 
+    // MARK: - Rationing (Phase 3)
+
+    /// `CFAbsoluteTimeGetCurrent()` at `begin()` - the "sequence start" half
+    /// of the covered-work measurement the spec asks for.
+    private var beginTime: CFAbsoluteTime = 0
+    /// `documentReady()`'s timestamp minus `beginTime` - the "document
+    /// landing" half. 0 until the document lands, which is also the safe
+    /// "don't scale" default `postResultTiming` reads.
+    private(set) var coveredWorkDuration: Double = 0
+    /// This run's tier (dial 2), fixed at `begin()`.
+    private var tier: RevealTier = .rationed
+
+    /// The actual timing this run's decide/assemble/settle beats use: the
+    /// tier's numbers (dial 2), scaled by how long the covered work actually
+    /// took (dial 1). Computed fresh rather than cached because
+    /// `coveredWorkDuration` is still 0 the instant `documentReady` fires
+    /// (set in the same call) and only becomes final once the scan beat's
+    /// wait loop has observed it - by the time `run()` reaches the decide
+    /// beat this is stable.
+    private var postResultTiming: PostResultTiming {
+        let base = tier == .generous ? PostResultTiming.generous : PostResultTiming.rationed
+        guard coveredWorkDuration > 0 else { return base }
+        let scale = min(1, max(Self.minPostResultScale, coveredWorkDuration / Self.referenceCoveredWork))
+        return base.scaled(by: scale)
+    }
+
     /// Reduce Motion cuts straight through (spec: "Reduce Motion cuts
     /// straight through", matching the ghost demo's own handling): the caller
     /// gets `false`, keeps its existing spinner, and commits the document the
@@ -333,14 +555,40 @@ final class MagicLayoutController {
         return UIAccessibility.isReduceMotionEnabled
     }
 
+    /// True once the full (generous) reveal has ever played to completion,
+    /// UNSKIPPED, on this device - set exactly once, at the bottom of
+    /// `run()`'s natural (non-cancelled) path. Drives both rationing dials:
+    /// which tier a NEW reveal gets (`RevealTier.generous` vs `.rationed`,
+    /// in `begin()`) and, under `MagicRevealPreference.firstTimeOnly`,
+    /// whether a reveal plays again AT ALL. Plain `UserDefaults` for the
+    /// same reason as `MagicRevealPreference` above.
+    private static let hasPlayedFullRevealDefaultsKey = "magicLayoutHasPlayedFullReveal"
+    static var hasPlayedFullReveal: Bool {
+        get { UserDefaults.standard.bool(forKey: hasPlayedFullRevealDefaultsKey) }
+        set { UserDefaults.standard.set(newValue, forKey: hasPlayedFullRevealDefaultsKey) }
+    }
+
     /// Starts the sequence. Returns false when the sequence is bypassed
-    /// (Reduce Motion / `-magicLayoutOff`), in which case the caller must
-    /// keep its old spinner-and-commit behavior.
+    /// (Reduce Motion / `-magicLayoutOff` / the Settings preference), in
+    /// which case the caller must keep its old spinner-and-commit behavior.
     @discardableResult
     func begin(sources: [MagicSource]) -> Bool {
         guard !isActive else { return true }
         guard !Self.isDisabled else {
             MagicTiming.mark("sequence bypassed (Reduce Motion / -magicLayoutOff)")
+            return false
+        }
+        // Settings' three-state control (spec: "Rationing"). Checked AFTER
+        // Reduce Motion so that one always wins regardless of this setting,
+        // and BEFORE the empty-sources guard so `-magicSlow`/timing marks
+        // stay meaningful for whichever reason a run didn't happen.
+        let preference = MagicRevealPreference.current
+        if preference == .off {
+            MagicTiming.mark("sequence bypassed (Settings: Off)")
+            return false
+        }
+        if preference == .firstTimeOnly, Self.hasPlayedFullReveal {
+            MagicTiming.mark("sequence bypassed (Settings: First Time Only, already played)")
             return false
         }
         // Nothing to fly (2026-07-28 review). The denied/limited-access
@@ -364,6 +612,13 @@ final class MagicLayoutController {
         glowsEnabled = false
         morphProgress = 0
         sweep = 0
+        // Dial 2 - fixed for the whole run. `preference == .firstTimeOnly`
+        // only ever reaches here when `hasPlayedFullReveal` is false (the
+        // guard above returns otherwise), so that preference always gets
+        // `.generous` - the one reveal it ever shows is the full one.
+        tier = Self.hasPlayedFullReveal ? .rationed : .generous
+        beginTime = CFAbsoluteTimeGetCurrent()
+        coveredWorkDuration = 0
         scrim = 0
         overlayOpacity = 0
         glowStrength = 0
@@ -415,6 +670,13 @@ final class MagicLayoutController {
     func documentReady(_ result: PickCompletion) {
         MagicTiming.mark("document ready + editor mounted")
         completion = result
+        // Dial 1's measurement: "from sequence start to the document
+        // landing" (spec), taken exactly once per run - `beginTime > 0`
+        // guards against a stray second call (there isn't one today, but
+        // this must never double-count).
+        if beginTime > 0, coveredWorkDuration == 0 {
+            coveredWorkDuration = CFAbsoluteTimeGetCurrent() - beginTime
+        }
         guard isActive else { return }
         rebuildPlans()
     }
@@ -522,6 +784,21 @@ final class MagicLayoutController {
         }
         guard !Task.isCancelled else { return }
 
+        // Everything from here on structurally runs AFTER the document
+        // exists - the "after the result already exists" half of the spec's
+        // measurement, the only part worth rationing. Resolved once, now,
+        // rather than read live off `postResultTiming` at each step:
+        // `coveredWorkDuration` is stable the instant the wait loop above
+        // exits (`documentReady` set it synchronously before `completion`
+        // itself), and a single snapshot keeps this run's pacing internally
+        // consistent even if something odd raced the computed property.
+        // This is ALSO why the glow-reveal stagger below (part of the "scan"
+        // label, but downstream of this same exit point) is a
+        // `PostResultTiming` field rather than living next to the free
+        // `scanFloor`/`scanCap` above - it cannot overlap covered work
+        // either.
+        let timing = postResultTiming
+
         // `documentReady` just ran `rebuildPlans()` synchronously, almost
         // certainly before the canvas rect existed (see the comment there) -
         // so `glowsEnabled` cannot yet reflect a real decision. Wait,
@@ -529,7 +806,7 @@ final class MagicLayoutController {
         // triggers before reading `glowsEnabled` below. A glow that starts
         // ~30ms later (the measured real-world gap) is far better than one
         // that has to retract.
-        await waitForResolvedPlans(cap: 0.25)
+        await waitForResolvedPlans(cap: timing.resolveWaitCap)
         guard !Task.isCancelled else { return }
 
         // Real glows on real detections, staggered so they read as "found,
@@ -538,16 +815,18 @@ final class MagicLayoutController {
         // destinations never resolved at all, in which case `glowsEnabled`
         // is still sitting at its safe `begin()` default, `false`.
         if glowsEnabled {
-            withAnimation(.easeOut(duration: Self.scaled(0.22))) { glowStrength = 1 }
-            let stagger = min(0.09, Self.scanCap / Double(max(photos.count, 1)) / 2)
+            withAnimation(.easeOut(duration: Self.scaled(timing.glowInDuration))) { glowStrength = 1 }
             for _ in photos.indices {
                 guard !Task.isCancelled else { return }
-                withAnimation(.easeOut(duration: Self.scaled(0.18))) { revealedGlows += 1 }
-                await sleep(stagger)
+                withAnimation(.easeOut(duration: Self.scaled(timing.glowStepDuration))) { revealedGlows += 1 }
+                await sleep(timing.glowRevealStagger)
             }
         }
         // The floor, measured from the START of the scan beat, so slow work
-        // pays nothing for it.
+        // pays nothing for it. Unrationed (arrive/scan's own floor, not a
+        // `PostResultTiming` field) - it only ever engages when the document
+        // arrived faster than the floor itself, which the tier split above
+        // doesn't change.
         let elapsed = CFAbsoluteTimeGetCurrent() - scanStart
         if elapsed < Self.scanFloor {
             await sleep(Self.scanFloor - elapsed)
@@ -559,7 +838,7 @@ final class MagicLayoutController {
         // took longer than that first cap: destRect must be correct before
         // ASSEMBLE needs it (capped - a still-missing rect falls back to the
         // source rect, i.e. no morph, rather than hanging).
-        await waitForResolvedPlans(cap: 0.25)
+        await waitForResolvedPlans(cap: timing.resolveWaitCap)
         guard !Task.isCancelled else { return }
 
         // BEAT 3 - DECIDE. The whole reason the feature exists: this is the
@@ -572,7 +851,7 @@ final class MagicLayoutController {
         // the arrangement exists before the photos move into it, which is
         // exactly the order the algorithm did it in.
         beat = .decide
-        withAnimation(.easeOut(duration: Self.scaled(0.10))) {
+        withAnimation(.easeOut(duration: Self.scaled(timing.decideFlareDuration))) {
             sweep = 0                       // kill the repeatForever
             if glowsEnabled { glowStrength = 2.1 }
             decideFlash = 1
@@ -588,13 +867,13 @@ final class MagicLayoutController {
         // something, and a single haptic is the cheapest way to make a
         // visual beat feel caused rather than scheduled.
         decisionHaptic.impactOccurred(intensity: 0.9)
-        await sleep(0.10)
+        await sleep(timing.decideFlareDuration)
         guard !Task.isCancelled else { return }
-        withAnimation(.easeOut(duration: Self.scaled(0.22))) {
+        withAnimation(.easeOut(duration: Self.scaled(timing.decideFadeAnimDuration))) {
             if glowsEnabled { glowStrength = 1.15 }
             decideFlash = 0
         }
-        await sleep(Self.decideDuration - 0.10)
+        await sleep(timing.decideFadeSleepDuration)
         guard !Task.isCancelled else { return }
 
         // BEAT 4 - ASSEMBLE. Frame AND crop, together (see `MagicPhotoPlan`),
@@ -608,10 +887,10 @@ final class MagicLayoutController {
         // the way into the cell is what carries the causal claim through the
         // motion instead of dropping it the moment the photos start moving.
         beat = .assemble
-        withAnimation(.timingCurve(0.22, 0.68, 0.16, 1, duration: Self.scaled(Self.assembleDuration))) {
+        withAnimation(.timingCurve(0.22, 0.68, 0.16, 1, duration: Self.scaled(timing.assembleDuration))) {
             morphProgress = 1
         }
-        await sleep(Self.assembleHold)
+        await sleep(timing.assembleHold)
         guard !Task.isCancelled else { return }
 
         // BEAT 5 - SETTLE / HANDOFF. Three staggered sub-beats, in this
@@ -622,21 +901,29 @@ final class MagicLayoutController {
         // anywhere - if any of it lingered, the user would still be waiting
         // for permission to touch the thing.
         beat = .settle
-        withAnimation(.easeInOut(duration: Self.scaled(0.24))) {
+        withAnimation(.easeInOut(duration: Self.scaled(timing.photoCrossfadeDuration))) {
             overlayOpacity = 0
             scrim = 0
         }
-        await sleep(Self.glowOutDelay)
+        await sleep(timing.glowOutDelay)
         guard !Task.isCancelled else { return }
-        withAnimation(.easeIn(duration: Self.scaled(Self.glowOutDuration))) {
+        withAnimation(.easeIn(duration: Self.scaled(timing.glowOutDuration))) {
             glowStrength = 0
             slotReveal = 0
         }
-        await sleep(Self.chromeInDelay - Self.glowOutDelay)
+        await sleep(timing.chromeInDelay - timing.glowOutDelay)
         guard !Task.isCancelled else { return }
-        revealEditorChrome(duration: Self.chromeInDuration)
-        await sleep(Self.settleDuration - Self.chromeInDelay)
+        revealEditorChrome(duration: timing.chromeInDuration)
+        await sleep(timing.settleDuration - timing.chromeInDelay)
         guard !Task.isCancelled else { return }
+        // Reached only on the UNSKIPPED natural path (a skip cancels the
+        // task, which returns out of every `guard !Task.isCancelled` above
+        // before ever reaching here) - so this is exactly "the full reveal
+        // played, to completion, and the user actually saw it", which is
+        // what both rationing dials key off of for every later run.
+        if tier == .generous {
+            Self.hasPlayedFullReveal = true
+        }
         finish()
     }
 

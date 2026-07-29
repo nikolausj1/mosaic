@@ -35,6 +35,14 @@ struct SettingsSheet: View {
 
     @State private var showPaywall = false
     @State private var showClearConfirm = false
+    /// B32 Phase 3 rationing: mirrors `MagicRevealPreference.current` in
+    /// plain View `@State` so the Picker below re-renders on selection - the
+    /// UserDefaults key it syncs to (via `onChange`) is the actual source of
+    /// truth `MagicLayoutController.begin()` reads, exactly as `@AppStorage`
+    /// would give a live-bound control, but without composing that property
+    /// wrapper onto an `@Observable` class (see the reasoning on
+    /// `MagicRevealPreference` itself).
+    @State private var revealPreference: MagicRevealPreference = MagicRevealPreference.current
 
     var body: some View {
         NavigationStack {
@@ -47,6 +55,30 @@ struct SettingsSheet: View {
                     }
                 }
                 .listRowBackground(Color.mosaicSurface)
+
+                // B32 Phase 3 (Justin, 2026-07-28): the reveal's one Settings
+                // control, its own Section so it reads as a distinct
+                // preference rather than blending into the purchase rows
+                // above or the lower-trust Dev Tools group below.
+                Section {
+                    Picker(selection: $revealPreference) {
+                        ForEach(MagicRevealPreference.allCases) { preference in
+                            Text(preference.displayName).tag(preference)
+                        }
+                    } label: {
+                        Text("Reveal animation")
+                            .foregroundStyle(.white)
+                    }
+                    .pickerStyle(.menu)
+                    .tint(.white.opacity(0.6))
+                } footer: {
+                    Text("Plays when a new collage is created: photos fly in, face detection lights up, and the chosen layout assembles. \"First time only\" shows it once, ever. Off automatically when Reduce Motion is on, regardless of this setting.")
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+                .listRowBackground(Color.mosaicSurface)
+                .onChange(of: revealPreference) { _, newValue in
+                    MagicRevealPreference.current = newValue
+                }
 
                 // Dev Tools group (Justin, 2026-07-27, moved from the deleted
                 // `DevSheet.swift`) - a visually separate Section below the
