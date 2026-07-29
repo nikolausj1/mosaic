@@ -2,7 +2,7 @@
 title: "Magic Layout - Build Spec"
 created: 2026-07-28
 modified: 2026-07-28
-version: 1.8
+version: 1.9
 author: Claude Opus 5 (claude-opus-5)
 tags:
 ---
@@ -214,6 +214,28 @@ The threshold is not the whole story, and lowering it would be the wrong fix:
 - **Every all-portrait 4-photo set scored WORSE at 4:5 than at square** (margins -0.06 to -0.32 per photo, all five variants). That is precisely this phase's motivating example - "four portraits in a square canvas crops every face harder than necessary" - and the measurement says the opposite.
 
 So one of three things is true, and Phase 4 has to determine which: the cost function is missing something real about canvas shape; the motivating intuition is wrong; or comparing costs across canvases of different AREA is not the apples-to-apples comparison it appears to be (short-edge sizing keeps the border honest, but total area still differs by 25 percent between square and 4:5).
+
+#### FOLLOW-UP, same evening: two of the three are now eliminated, and the mechanism is isolated
+
+**Hypothesis 3 is dead.** `framingCost` is exactly scale-invariant - a 4x area change with the aspect held constant moves the cost by 0.000000000000 and never changes the chosen template. Comparing different-area canvases is valid.
+
+**The "3 of 30" number above was partly my own artifact, and is corrected.** That probe specified must-keep regions in NORMALIZED coordinates; converted to real pixels inside portrait photos they came out 0.81-2.44 aspect, i.e. mostly WIDER than a real face. A head-and-shoulders region is taller than wide (~0.6-0.8). Re-run sweeping REAL must-keep aspect:
+
+| Real must-keep aspect | 2 photos | 4 photos |
+|---|---|---|
+| 0.55 | **challenger wins** | square better by 0.54 |
+| 0.65 | **challenger wins** | square better by 0.78 |
+| 0.75 | better, below bar | square better by 0.75 |
+| 1.00 | better, below bar | square better by 0.92 |
+
+So **the 2-photo case works as designed** and fires at realistic face shapes; the threshold is roughly correctly placed there. **The 4-photo anomaly is real and consistent** - square wins at every must-keep aspect, including very tall ones.
+
+**The mechanism, isolated.** A 1-D sweep of `framingCost` over `cellAspect`, for a single photo with a must-keep of real aspect 0.65, is minimised at **cellAspect ~1.12** - and has a local MAXIMUM at 0.68, essentially the correct value. The function prefers cells that do NOT suit the subject. Per-template costs make it concrete: the same 2x2 grid scores 0.79 at a square canvas (cells 1.00) and 3.95 at 4:5 (cells 0.79), five times worse for cells that match the subject far better.
+
+**Two distinct defects, do not conflate them:**
+
+1. **A units bug in the aspect term** (real, confirmed): `mustKeepW/H` are normalized fractions while `cellAspect` is a real geometric ratio, so the term compared mismatched spaces - scoring a 0.65 region as 0.98. Fixed on branch `fix/framing-cost-aspect-units`, **left unmerged**: it moves the layout decision for every collage with a face and breaks 4 smoke assertions that encode the old numbers, so someone must decide whether those tests described correct behaviour or merely existing behaviour.
+2. **The dominant term is `areaCoverage` / `smallFace`**, NOT the aspect term. Fixing the units bug does not move the 1.12 minimum at all. The coverage term rewards the tighter zoom that a wider cell forces, which is what actually drives portrait sets toward square canvases. **This is the thing to investigate**, and it wants real photos through LayoutLab before anyone changes a weight.
 
 **Deliberately NOT tuned here.** The probe uses synthetic must-keep regions, and tuning a cost function against invented inputs is how a model gets confidently wrong. `Tools/LayoutLab/` exists precisely so this can be answered with a real camera roll, and that answer belongs to Phase 4. Recorded now because it would be easy to mistake "wired in and verified" for "working", and the honest position is that Phase 5's value is **latent** until the cost function is tuned.
 

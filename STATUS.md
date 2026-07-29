@@ -2,7 +2,7 @@
 title: "STATUS - Photo Collage"
 created: 2026-07-24
 modified: 2026-07-28
-version: 3.2
+version: 3.3
 author: Claude Opus 5 (claude-opus-5)
 tags:
 ---
@@ -70,7 +70,7 @@ Active Development, in App Store preparation. Feature-complete for v1 including 
 
 ## Biggest Risk
 
-Layout quality has never been judged against real photos, and there is now hard evidence that matters. The new canvas-ratio decision (Phase 5) is wired in and verified correct, yet it clears its own override threshold in only 3 of 30 probe cases and did not fire once in six real simulator picks. Worse, every all-portrait four-photo set scored WORSE at 4:5 than at square - which is the exact example that motivated building it. So either the cost function is missing something real or the intuition was wrong, and the same cost function drives auto-framing (B20), the feature most able to silently embarrass the app on a stranger's photos. All of it has only ever been judged against ~4 curated photos and simulator runs. LayoutLab now makes the real test cheap; it just needs your camera roll.
+Layout quality has never been judged against real photos, and a probe has now isolated a likely defect. `framingCost` - the function behind both the face-aware layout choice AND auto-framing (B20) - is minimised at a cell aspect of ~1.12 for a subject whose real aspect is 0.65, with a local MAXIMUM at the correct value. It prefers cells that do not suit the subject. That explains why portrait sets keep choosing square canvases and why the Phase 5 ratio challenger almost never fires. A separate, smaller units bug in the same function is fixed on branch `fix/framing-cost-aspect-units`, left unmerged because it changes every collage with a face and breaks 4 smoke assertions that encode the old numbers. **Nothing here should be tuned until real photos have gone through LayoutLab** - the dominant term is the area-coverage one, and changing weights against synthetic inputs is how this gets confidently wrong.
 
 ---
 
