@@ -23,3 +23,56 @@ This project is tracked by Oracle, a portfolio agent at the `_Projects` root tha
 6. Edits to `STATUS.md` marked "updated via Oracle at Justin's direction" are legitimate and authoritative: Justin dictated them at the portfolio level. Reconcile them with the backlog at session start; do not revert them.
 7. Share what you learn. When this project discovers a reusable technique, fix, or better workflow that other projects could benefit from (environment-level, not project-specific design), record it briefly in an optional `## Lessons` section at the bottom of `STATUS.md`, below the divider. Oracle reviews these every run and promotes vetted ones into the shared Project Build Guide. The master guide at `_Projects/_Templates/Project Build Guide.md` is authoritative; if this folder contains its own older copy, prefer the master and its Changelog.
 
+
+## Branches: what goes where
+
+Two long-lived branches. They are not "current" and "future" - `next` is a
+SUPERSET of `main`, and it should stay that way.
+
+- **`main`** is what ships. It is always in a state you would be willing to
+  submit.
+- **`phase3-handover`** (the "Mosaic Next" build) is the proving ground. It
+  carries everything in `main` plus whatever is being judged. Its bundle ID is
+  `com.levelup.mosaic.next` and its display name is "Mosaic Next", so it
+  installs ALONGSIDE the real app on Justin's phone rather than replacing it.
+
+### The rule
+
+> If you would need to see it running to know whether it is right, it goes to
+> Next. If it is unambiguously correct, it goes to `main`.
+
+Put another way: if I am wrong about this, do I want it on the App Store?
+
+**To Next:** anything you have to feel (animation, pacing, timing); anything
+that changes composition, especially the `framingCost` weights, since only
+Justin's eye can say whether the output got better; dev tooling that must
+never ship; and genuine experiments where "this turned out to be wrong" is an
+acceptable result.
+
+**To `main`:** submission work; crashes and correctness bugs where there is no
+taste question; small polish with an obvious right answer; the name change.
+
+### Merge direction is one-way
+
+- **`main` -> Next: merge freely**, and do it often. That is what keeps Next a
+  superset and stops the testbed drifting behind.
+- **Next -> `main`: cherry-pick only, NEVER a straight merge.** Next carries at
+  least two commits that must never reach the App Store: the bundle-ID and
+  display-name change, and the "Capture this collage" feedback tool. A full
+  merge would drag both into the shipping binary.
+
+### The rule that stops `main` rotting
+
+**A bug found while testing Next, in code both branches share, gets fixed on
+`main` and merged down.** Never patched on Next alone.
+
+Almost everything in Next is shared code. Justin will be looking at Next when
+he finds things, so this is easy to get wrong, and the failure mode is quiet:
+`main` keeps a bug that was already fixed, and ships with it.
+
+### Other branches
+
+- `fix/framing-cost-aspect-units` - the units bug in `framingCost`. Real, but
+  it changes every collage containing a face and breaks four smoke assertions
+  that encode the old numbers, so it lands as part of the weight retuning
+  rather than on its own.
