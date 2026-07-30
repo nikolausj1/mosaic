@@ -84,6 +84,16 @@ struct SettingsSheet: View {
                 // `DevSheet.swift`) - a visually separate Section below the
                 // purchase rows above, same reasoning `DevSheet` had for
                 // keeping these apart from everything else.
+                //
+                // GATED OUT OF RELEASE 2026-07-30, per this file's own header
+                // note, which had asked for exactly this and never got it.
+                // "Clear collages" is a red destructive action that silently
+                // discards the user's current and last work with no undo, and
+                // "Replay first-run experience" exposes internal state nobody
+                // outside development has a reason to reach. Shipping either
+                // is worse than an App Review risk - it is a way for a real
+                // person to lose a collage they were in the middle of.
+                #if DEBUG
                 Section {
                     Button {
                         onReplayFirstRun()
@@ -115,6 +125,7 @@ struct SettingsSheet: View {
                         .foregroundStyle(.white.opacity(0.4))
                 }
                 .listRowBackground(Color.mosaicSurface)
+                #endif
 
                 Section {
                     HStack {
