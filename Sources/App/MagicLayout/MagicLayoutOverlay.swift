@@ -109,6 +109,20 @@ struct PickCompletion {
     /// boxes must be genuinely what the framing decision used, not every
     /// speculative detection.
     var faceRectsByPhotoID: [PhotoID: [CGRect]]
+    /// B32 Phase 3 (handover): `MagicLayoutDecision.templateIndex` -
+    /// `chooseCanvasAndLayout`'s index into `templates(for:)`'s fixed-order
+    /// candidate list. The handover beat reconstructs that candidate's
+    /// AUTHORED fractions (`templates(for: orderedPhotoIDs)[templateIndex]`)
+    /// to compare against the fractions actually landed in `document.root` -
+    /// which is what lets the divider capsules animate the REAL delta Phase
+    /// 2's search produced, rather than a demonstration. Divider search never
+    /// changes a template's topology (only its fractions and which photo
+    /// permutation fills its leaves - see `searchDividerFractions`'s own doc
+    /// comment in `Sources/Engine/MagicLayout.swift`), so the authored
+    /// candidate and `document.root` are always the same tree SHAPE, just
+    /// with (possibly) different fraction values at the same paths - exactly
+    /// what the handover needs to compare.
+    var templateIndex: Int
 }
 
 // MARK: - Render model
@@ -135,6 +149,56 @@ struct MagicPhotoPlan: Identifiable {
     var destCenter: CGPoint
     /// Normalized to photo space, top-left origin.
     var faces: [CGRect]
+}
+
+// MARK: - Handover (Phase 3 revision) - divider geometry
+
+/// One interior divider the handover beat can show migrating from the
+/// template's AUTHORED position (what the app would have shown WITHOUT
+/// face-awareness - the honest "before" the spec's honesty line permits,
+/// since it is literally what today's aspect-only path would have produced,
+/// not a fabricated contrast) to the position the document ACTUALLY carries
+/// (Phase 2's real divider search output). Built once, alongside the photo
+/// plans, the moment real destination geometry exists - see
+/// `MagicLayoutController.rebuildPlans()`.
+///
+/// Deliberately keyed and positioned independently of `CanvasView`'s own
+/// `capsuleSpecs` (which walks per-LEAF edge ownership, so a divider shared
+/// by cells of different extents along it - e.g. a big leaf beside a
+/// 3-row stack - draws more than one capsule instance at different
+/// sub-positions). This type instead reads the divider's FULL boundary
+/// (`DividerFrame.line`, from `solve()`) and centers a capsule-shaped rect
+/// on it at 50% length / 5pt thick - the same proportions `capsuleSpecs`
+/// uses, just measured against the whole shared edge rather than one
+/// leaf's own slice of it. That is enough for a ghost that fades OUT as the
+/// real capsule fades IN nearby (see `MagicLayoutOverlay.handoverAffordances`)
+/// - it does not need to register pixel-for-pixel against every nested
+/// case, only land in the right neighborhood at the right moment.
+struct HandoverDividerPlan: Identifiable, Equatable {
+    let id: String
+    let axis: Axis
+    /// Canvas-local capsule rect at the template's AUTHORED fractions.
+    let authoredRect: CGRect
+    /// Canvas-local capsule rect at the fractions `document.root` actually
+    /// carries - pixel-identical to where `CanvasView`'s own (currently
+    /// held-back) capsule sits.
+    let chosenRect: CGRect
+    /// |chosen - authored| in FRACTION units (the same space `Node.fractions`
+    /// uses - NOT a rect-space distance), because the spec's own example
+    /// ("0.50 to 0.55") is stated in fraction terms and
+    /// `MagicLayoutController.minVisibleDividerFractionDelta` is tuned
+    /// against that same unit.
+    let fractionDelta: Double
+    /// Logged (spec acceptance: "before and after fractions logged") -
+    /// never rendered from directly.
+    let authoredFraction: Double
+    let chosenFraction: Double
+
+    /// See `MagicLayoutController.minVisibleDividerFractionDelta`'s doc
+    /// comment for the reasoning behind this specific cutoff.
+    var crossesVisibilityThreshold: Bool {
+        fractionDelta >= MagicLayoutController.minVisibleDividerFractionDelta
+    }
 }
 
 // MARK: - Rationing (Phase 3) - Settings
@@ -216,10 +280,28 @@ final class MagicLayoutController {
         /// ~500ms: the morph - frame AND crop - into those slots, glows
         /// still lit and still welded to their faces the whole way.
         case assemble
+        /// B32 Phase 3 revision (Justin, 2026-07-28 - "the affordances
+        /// perform the work; there is no ghost fingertip"): the SECOND of
+        /// the sequence's three movements ("Assemble" / "Handover" /
+        /// "Invitation"). The energy that was burning on the faces migrates
+        /// OUTWARD to the controls that are about to be handed to the user -
+        /// the divider capsules (which genuinely move, from the template's
+        /// AUTHORED fractions to the ones Phase 2's search actually chose -
+        /// see `HandoverDividerPlan`) and the canvas corner brackets (which
+        /// only RECEIVE the glow and never move - Phase 5's ratio decision
+        /// almost never fires, so there is no true delta for them to
+        /// perform yet; see `Magic Layout Spec.md`'s Phase 3 revision).
+        /// Skipped ENTIRELY (not just visually suppressed) whenever
+        /// `glowsEnabled` is false - a faceless set has no glow to migrate,
+        /// and "nothing moves" IS the honest answer for that case, at zero
+        /// added wall clock.
+        case handover
         /// ~460ms: the handoff. The photo layer crossfades onto the identical
         /// editor underneath, then the last of the theater (glows, slots,
-        /// scrim) fades out as the editor's own always-on affordances - the
-        /// divider capsules and corner handles - come in behind it.
+        /// scrim, and the handover's migrating capsules/brackets) fades out
+        /// as the editor's own always-on affordances - the divider capsules
+        /// and corner handles - come in behind it, landing exactly where the
+        /// handover's ghosts left off.
         case settle
     }
 
@@ -317,6 +399,17 @@ final class MagicLayoutController {
         /// or two of the destination the editor underneath is already
         /// drawing them at, so beginning the crossfade there is invisible.
         var assembleHold: Double
+        /// The handover beat's glow crossfade - the face glow dimming as the
+        /// control glow (divider capsules + corner brackets) brightens.
+        /// (The divider capsules' own POSITION migration runs on a fixed,
+        /// unscaled spring - see `run()` - matching how the decide beat's
+        /// `slotReveal` spring is also left out of this scaling: a spring's
+        /// feel is tuned once, not stretched by dial 1.)
+        var handoverGlowDuration: Double
+        /// How long `run()` actually holds on the handover beat before
+        /// moving to settle - long enough for the capsule migration's
+        /// overshoot-and-settle spring to fully land, not just start.
+        var handoverHoldDuration: Double
         /// Settle's photo-layer crossfade animation duration (the overlay's
         /// photos dissolving onto the editor's identical ones underneath).
         var photoCrossfadeDuration: Double
@@ -344,6 +437,8 @@ final class MagicLayoutController {
             decideFadeSleepDuration: 0.16,
             assembleDuration: 0.50,
             assembleHold: 0.44,
+            handoverGlowDuration: 0.30,
+            handoverHoldDuration: 0.48,
             photoCrossfadeDuration: 0.24,
             settleDuration: 0.46,
             glowOutDelay: 0.08,
@@ -363,6 +458,8 @@ final class MagicLayoutController {
                 decideFadeSleepDuration: decideFadeSleepDuration * factor,
                 assembleDuration: assembleDuration * factor,
                 assembleHold: assembleHold * factor,
+                handoverGlowDuration: handoverGlowDuration * factor,
+                handoverHoldDuration: handoverHoldDuration * factor,
                 photoCrossfadeDuration: photoCrossfadeDuration * factor,
                 settleDuration: settleDuration * factor,
                 glowOutDelay: glowOutDelay * factor,
@@ -483,6 +580,44 @@ final class MagicLayoutController {
     /// decision - the "click" of the layout landing.
     private(set) var decideFlash: Double = 0
 
+    /// Handover beat (Phase 3 revision): brightness of the CONTROL glow - the
+    /// divider capsules and corner brackets lighting up - independent of
+    /// `glowStrength` (the FACE glow) so the two can crossfade against each
+    /// other (faces dim as controls brighten) rather than being forced to
+    /// share one envelope. 0 before/after the handover; ramps to 1 during it.
+    private(set) var controlGlowStrength: Double = 0
+    /// 0...1: how far the migrating divider capsules have travelled from
+    /// their AUTHORED position to the CHOSEN one (see `HandoverDividerPlan`).
+    /// Driven by a spring (overshoot-and-settle, per the spec's own guidance
+    /// on imperceptible deltas) so a real-but-small move still reads as
+    /// motion without overselling it.
+    private(set) var handoverProgress: Double = 0
+    /// Built once, when destinations resolve, alongside `photos` - see
+    /// `rebuildPlans()`. Empty on the faceless degrade path (no `glowsEnabled`
+    /// means the handover beat never runs at all, so this is simply never
+    /// consulted there) and whenever `completion`/`canvasRect` aren't ready.
+    private(set) var handoverDividers: [HandoverDividerPlan] = []
+
+    /// Below this, even an overshoot-eased migration would be manufacturing
+    /// drama the actual move doesn't support (spec: "a divider moving 0.50
+    /// to 0.55 may not read at all... below some threshold it is better to
+    /// skip the emphasis entirely than to manufacture drama - pick a
+    /// threshold"). CHOSEN VALUE, reported rather than decided: 0.03 (3
+    /// percentage points of fraction space). Reasoning: Phase 2's own search
+    /// grid (`dividerSearchGrid = [0.3, 0.4, 0.5, 0.6, 0.7]`, a 0.1 step in
+    /// the LOCAL pair's own split point) can only ever produce a non-zero
+    /// GLOBAL fraction delta of roughly 0.05 or more on the smallest real
+    /// pair (a 4-way split's adjacent pair sums to 0.5 of that node's own
+    /// 1.0, so 0.1 x 0.5 = 0.05) - so 0.03 sits comfortably below every real
+    /// non-zero move this codebase can actually produce, while still
+    /// excluding a hypothetical near-zero artifact (e.g. coordinate descent
+    /// nudging an authored 1/3 to the nearest grid point 0.3, a ~0.02 global
+    /// delta) from being dramatized. On a typical ~350pt canvas short edge,
+    /// 0.03 of it is roughly 10pt of capsule travel - this is a judgment
+    /// call about where "real but not worth animating" begins, and it wants
+    /// a phone in hand to confirm, same as the rest of this beat's pacing.
+    static let minVisibleDividerFractionDelta = 0.03
+
     /// True from the moment the sequence starts until the handoff beat -
     /// read by `CanvasView` (via `EditorView`), which holds its always-on
     /// divider capsules, corner handles and brackets back while the theater
@@ -527,6 +662,12 @@ final class MagicLayoutController {
     /// as the flare rather than a warm-up later (same reason `Haptics` keeps
     /// its generators prepared).
     private let decisionHaptic = UIImpactFeedbackGenerator(style: .soft)
+    /// A second, softer tap at the moment the handover beat starts - the
+    /// physical cue that "the controls just became yours," parallel to
+    /// `decisionHaptic`'s tap at "the layout was just chosen." Deliberately
+    /// gentler (0.6 vs `decisionHaptic`'s 0.9 intensity): the decide beat is
+    /// the loud moment, handover is a quieter one.
+    private let handoverHaptic = UIImpactFeedbackGenerator(style: .soft)
 
     // MARK: - Rationing (Phase 3)
 
@@ -632,9 +773,13 @@ final class MagicLayoutController {
         glowStrength = 0
         slotReveal = 0
         decideFlash = 0
+        controlGlowStrength = 0
+        handoverProgress = 0
+        handoverDividers = []
         suppressEditorChrome = true
         beat = .arrive
         decisionHaptic.prepare()
+        handoverHaptic.prepare()
         seedPlansFromSources()
 
         task = Task { await run() }
@@ -736,6 +881,9 @@ final class MagicLayoutController {
         glowStrength = 0
         slotReveal = 0
         decideFlash = 0
+        controlGlowStrength = 0
+        handoverProgress = 0
+        handoverDividers = []
         photos = []
         sources = []
         // Terminal handoff, non-negotiable: ALL theater is gone by here, and
@@ -913,6 +1061,51 @@ final class MagicLayoutController {
         await sleep(timing.assembleHold)
         guard !Task.isCancelled else { return }
 
+        // BEAT "HANDOVER" (Phase 3 revision, Justin 2026-07-28 evening -
+        // "the affordances perform the work; there is no ghost fingertip").
+        // The energy that has been burning on the faces migrates OUTWARD to
+        // the controls the user is about to be handed: the divider capsules
+        // (which genuinely move, from `HandoverDividerPlan.authoredRect` to
+        // `.chosenRect` - Phase 2's real search output, never a
+        // demonstration) and the corner brackets (which only RECEIVE the
+        // glow and never move - Phase 5's ratio decision almost never fires
+        // today, so there is no true delta for them to perform yet).
+        //
+        // Gated on `glowsEnabled`, and nothing else: with no face glow
+        // burning in the first place (the faceless degrade path) there is
+        // nothing to migrate, and skipping the WHOLE beat - not merely its
+        // visuals - is what keeps that case genuinely free (spec: "NOTHING
+        // SHOULD MOVE... stillness signals it did not [find something]").
+        if glowsEnabled {
+            beat = .handover
+            let migratingCount = handoverDividers.filter(\.crossesVisibilityThreshold).count
+            MagicTiming.mark("handover begin (\(migratingCount)/\(handoverDividers.count) dividers migrating)")
+            #if DEBUG
+            for d in handoverDividers {
+                NSLog("MAGIC handover divider %@: authored=%.4f chosen=%.4f delta=%.4f %@",
+                      d.id, d.authoredFraction, d.chosenFraction, d.fractionDelta,
+                      d.crossesVisibilityThreshold ? "MIGRATES" : "below threshold (static)")
+            }
+            #endif
+            handoverHaptic.impactOccurred(intensity: 0.6)
+            // The crossfade of LIGHT: faces dim as the controls brighten -
+            // same accent, same bloom language, just changing where it
+            // burns. Not wrapped in `Self.scaled` for the spring below
+            // (see the decide beat's `slotReveal` spring, same reasoning:
+            // a spring's feel is tuned once, not stretched by `-magicSlow`
+            // or dial 1 - only the SLEEP that gates the next beat is).
+            withAnimation(.easeInOut(duration: Self.scaled(timing.handoverGlowDuration))) {
+                controlGlowStrength = 1
+                glowStrength = 0.55
+            }
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.7)) {
+                handoverProgress = 1
+            }
+            await sleep(timing.handoverHoldDuration)
+            guard !Task.isCancelled else { return }
+            MagicTiming.mark("handover end")
+        }
+
         // BEAT 5 - SETTLE / HANDOFF. Three staggered sub-beats, in this
         // order, because the order IS the message: the composition becomes
         // real (the overlay's photos dissolve into the editor's identical
@@ -930,6 +1123,11 @@ final class MagicLayoutController {
         withAnimation(.easeIn(duration: Self.scaled(timing.glowOutDuration))) {
             glowStrength = 0
             slotReveal = 0
+            // The handover's ghost capsules/brackets finish fading out on
+            // the SAME curve the face glow burns down on - one continuous
+            // dimming of every piece of theater, matched against
+            // `revealEditorChrome` (below) fading the REAL chrome in.
+            controlGlowStrength = 0
         }
         await sleep(timing.chromeInDelay - timing.glowOutDelay)
         guard !Task.isCancelled else { return }
@@ -1066,6 +1264,19 @@ final class MagicLayoutController {
 
         photos = plans
 
+        // Handover geometry (Phase 3 revision): built alongside the photo
+        // plans above, once real destination geometry exists, so the
+        // divider capsules can migrate from the template's AUTHORED
+        // fractions to the ones `doc.root` actually carries. See
+        // `HandoverDividerPlan`'s own doc comment for why this is a
+        // separate, simpler geometry pass rather than reusing the photo
+        // cells' own `cellRectByID` above.
+        if canvasRect.width > 0, canvasRect.height > 0 {
+            handoverDividers = Self.buildHandoverDividers(completion: completion, canvasSize: canvasRect.size)
+        } else {
+            handoverDividers = []
+        }
+
         // Glows may only be switched ON by a build whose destinations are
         // REAL (2026-07-28, closing the gap the verification sweep flagged
         // rather than just recording it): a build that runs before the
@@ -1175,6 +1386,109 @@ final class MagicLayoutController {
         let originY = anchor.midY - totalH / 2 + Double(row) * (side + 8)
         return CGRect(x: originX, y: originY, width: side, height: side)
     }
+
+    // MARK: - Handover geometry (Phase 3 revision)
+
+    /// Identifies one interior divider the same way `Layout.swift`'s own
+    /// `DividerFrame` does: the path to the owning `.split` node, plus which
+    /// of its dividers (`index` separates child `index` from `index + 1`).
+    private struct DividerKey: Hashable {
+        let path: [Int]
+        let index: Int
+    }
+
+    /// Every interior divider's OWN fraction (`fractions[index]`, from the
+    /// `.split` node at `path`) - the raw number the spec's acceptance
+    /// criterion wants logged, and the value `crossesVisibilityThreshold`
+    /// compares across the authored/chosen pair. Reading `fractions[index +
+    /// 1]` instead would give the mirror-image delta (their sum is
+    /// preserved by every divider mutation - see `Node`'s own invariant
+    /// comment in Model.swift), so either side is equally valid; `index` is
+    /// arbitrary but must be used consistently, which this single walk
+    /// guarantees.
+    private static func dividerFractions(in root: Node) -> [DividerKey: Double] {
+        var result: [DividerKey: Double] = [:]
+        func walk(_ node: Node, path: [Int]) {
+            guard case .split(_, let fractions, let children) = node else { return }
+            for i in 0..<(fractions.count - 1) {
+                result[DividerKey(path: path, index: i)] = fractions[i]
+            }
+            for (i, child) in children.enumerated() {
+                walk(child, path: path + [i])
+            }
+        }
+        walk(root, path: [])
+        return result
+    }
+
+    /// Converts a `DividerFrame.line` (the FULL boundary strip `Layout.swift`
+    /// returns - zero-thickness at the zero-border default a fresh pick
+    /// always starts with, collapsing exactly to the boundary line) into a
+    /// capsule-shaped rect: 50% of the edge's length, centered, 5pt thick -
+    /// the same proportions `GestureController.capsuleSpecs` draws the real
+    /// interactive capsule at. See `HandoverDividerPlan`'s doc comment for
+    /// why this is a deliberately SIMPLER derivation than that function's
+    /// (which is per-leaf-edge and can therefore differ at a T-junction).
+    private static func capsuleRect(fromLine line: CGRect, axis: Axis) -> CGRect {
+        let thickness: CGFloat = 5
+        switch axis {
+        case .horizontal:
+            // Children side by side -> dividers are VERTICAL lines: `line`
+            // is a tall, gutter-width-wide strip (see Layout.swift).
+            let h = line.height * 0.5
+            return CGRect(x: line.midX - thickness / 2, y: line.midY - h / 2, width: thickness, height: h)
+        case .vertical:
+            // Children stacked -> dividers are HORIZONTAL lines: `line` is
+            // a wide, gutter-height-tall strip.
+            let w = line.width * 0.5
+            return CGRect(x: line.midX - w / 2, y: line.midY - thickness / 2, width: w, height: thickness)
+        }
+    }
+
+    /// Builds one `HandoverDividerPlan` per interior divider in the document
+    /// - see that type's own doc comment for the full reasoning. Returns
+    /// empty (rather than guessing) whenever the authored/chosen trees don't
+    /// correspond divider-for-divider, which per `PickCompletion
+    /// .templateIndex`'s contract should never actually happen (Phase 2
+    /// never restructures a template's topology) - this is a defensive
+    /// bail-out, not an expected path.
+    private static func buildHandoverDividers(completion: PickCompletion, canvasSize: CGSize) -> [HandoverDividerPlan] {
+        let doc = completion.document
+        let orderedIDs = completion.orderedPhotoIDs
+        guard (2...4).contains(orderedIDs.count) else { return [] }
+        let candidates = templates(for: orderedIDs)
+        guard !candidates.isEmpty else { return [] }
+        let index = min(max(completion.templateIndex, 0), candidates.count - 1)
+        let authoredTemplate = candidates[index]
+
+        let (_, chosenDividers) = solve(root: doc.root, canvasSize: canvasSize, border: doc.border)
+        let (_, authoredDividers) = solve(root: authoredTemplate, canvasSize: canvasSize, border: doc.border)
+        guard chosenDividers.count == authoredDividers.count else { return [] }
+
+        let authoredByKey = Dictionary(uniqueKeysWithValues: authoredDividers.map {
+            (DividerKey(path: $0.path, index: $0.index), $0)
+        })
+        let chosenFractionsByKey = dividerFractions(in: doc.root)
+        let authoredFractionsByKey = dividerFractions(in: authoredTemplate)
+
+        var plans: [HandoverDividerPlan] = []
+        for chosen in chosenDividers {
+            let key = DividerKey(path: chosen.path, index: chosen.index)
+            guard let authored = authoredByKey[key],
+                  let chosenFrac = chosenFractionsByKey[key],
+                  let authoredFrac = authoredFractionsByKey[key] else { continue }
+            plans.append(HandoverDividerPlan(
+                id: "\(key.path)-\(key.index)",
+                axis: chosen.axis,
+                authoredRect: capsuleRect(fromLine: authored.line, axis: authored.axis),
+                chosenRect: capsuleRect(fromLine: chosen.line, axis: chosen.axis),
+                fractionDelta: abs(chosenFrac - authoredFrac),
+                authoredFraction: authoredFrac,
+                chosenFraction: chosenFrac
+            ))
+        }
+        return plans
+    }
 }
 
 // MARK: - Timing instrumentation (DEBUG)
@@ -1256,6 +1570,14 @@ struct MagicLayoutOverlay: View {
                     if controller.beat == .scan {
                         sweepBand(in: proxy.size)
                             .opacity(controller.overlayOpacity)
+                    }
+                    // Handover (Phase 3 revision): drawn ON TOP of the
+                    // photos, same as the real divider capsules/corner
+                    // brackets are drawn on top of the cells in CanvasView -
+                    // so the migrating glow reads as sitting on the seam,
+                    // not behind the photo.
+                    if controller.controlGlowStrength > 0 {
+                        handoverAffordances(originFix: originFix)
                     }
                     if controller.decideFlash > 0 {
                         // 0.13 -> 0.17 (2026-07-28, "really celebrate it"):
@@ -1389,6 +1711,133 @@ struct MagicLayoutOverlay: View {
         .blendMode(.plusLighter)
         .position(x: size.width / 2, y: -bandHeight / 2 + controller.sweep * travel)
         .allowsHitTesting(false)
+    }
+
+    // MARK: - Handover (Phase 3 revision)
+
+    /// The energy migrating outward: a glowing ghost capsule per divider
+    /// (traveling from its AUTHORED position to its CHOSEN one when the move
+    /// clears `MagicLayoutController.minVisibleDividerFractionDelta`, static
+    /// otherwise - see `HandoverDividerPlan`), plus a glow at each of the
+    /// four canvas corners for the brackets. The brackets NEVER move here -
+    /// only capsules that genuinely moved do (spec: "nothing moves for
+    /// show"; brackets specifically "may RECEIVE the glow... but must NOT
+    /// move or reshape the canvas" until Phase 5's ratio decision genuinely
+    /// fires). These ghosts fade out in `settle` on the same curve the real
+    /// `CanvasView` chrome fades IN on (`controlGlowStrength` and
+    /// `revealEditorChrome` are driven together in `run()`), so the ghost
+    /// hands off to the real, static affordance rather than the two ever
+    /// being seen at full strength simultaneously.
+    @ViewBuilder
+    private func handoverAffordances(originFix: CGPoint) -> some View {
+        if let canvas = controller.destinationBounds {
+            ZStack {
+                ForEach(controller.handoverDividers) { divider in
+                    let rect = divider.crossesVisibilityThreshold
+                        ? Self.lerp(divider.authoredRect, divider.chosenRect, controller.handoverProgress)
+                        : divider.chosenRect
+                    capsuleGlow(rect: rect)
+                }
+                ForEach(BracketCorner.allCases, id: \.self) { corner in
+                    bracketGlow(corner: corner, canvasSize: canvas.size)
+                }
+            }
+            .frame(width: canvas.width, height: canvas.height)
+            .compositingGroup()
+            .blendMode(.plusLighter)
+            .opacity(controller.controlGlowStrength)
+            .position(x: canvas.midX - originFix.x, y: canvas.midY - originFix.y)
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// One migrating (or, below threshold, static) divider capsule's glow -
+    /// same three-layer bloom language `MorphingPhotoView.faceGlows` uses
+    /// for a face (wide soft halo, tighter halo, thin bright edge), so the
+    /// "same energy, new home" claim reads visually, not just conceptually.
+    private func capsuleGlow(rect: CGRect) -> some View {
+        ZStack {
+            Capsule()
+                .fill(Color.mosaicAccent)
+                .blur(radius: 10)
+                .opacity(0.55)
+            Capsule()
+                .fill(Color.mosaicAccent)
+                .blur(radius: 3.5)
+                .opacity(0.85)
+            Capsule()
+                .fill(Color.white.opacity(0.9))
+                .blur(radius: 0.5)
+                .opacity(0.5)
+        }
+        .frame(width: max(rect.width, 1), height: max(rect.height, 1))
+        .position(x: rect.midX, y: rect.midY)
+    }
+
+    /// A corner bracket's glow - a small blurred "L" at exactly
+    /// `bracketAnchor`'s vertex (the same fixed point `CanvasView.
+    /// bracketsOverlay` draws the real, always-visible bracket at). Reuses
+    /// `bracketAnchor` for POSITION parity with the real bracket but draws
+    /// its own simplified glyph rather than reusing `CanvasView`'s private
+    /// `BracketShape` - this is transient theater that fades out the moment
+    /// the real bracket fades in, so it only needs to read as "the same
+    /// corner, lighting up," not register stroke-for-stroke.
+    private func bracketGlow(corner: BracketCorner, canvasSize: CGSize) -> some View {
+        let anchor = bracketAnchor(corner, canvasSize: canvasSize)
+        return ZStack {
+            HandoverBracketGlyph(corner: corner)
+                .stroke(Color.mosaicAccent, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                .blur(radius: 8)
+                .opacity(0.6)
+            HandoverBracketGlyph(corner: corner)
+                .stroke(Color.mosaicAccent, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                .blur(radius: 2)
+                .opacity(0.85)
+        }
+        .frame(width: 22, height: 22)
+        .position(x: anchor.x, y: anchor.y)
+    }
+
+    private static func lerp(_ a: CGRect, _ b: CGRect, _ t: Double) -> CGRect {
+        CGRect(
+            x: a.minX + (b.minX - a.minX) * t,
+            y: a.minY + (b.minY - a.minY) * t,
+            width: max(a.width + (b.width - a.width) * t, 1),
+            height: max(a.height + (b.height - a.height) * t, 1)
+        )
+    }
+}
+
+/// A simplified glow glyph for one corner bracket, matching `CanvasView.
+/// BracketShape`'s "L" geometry (two strokes meeting at the canvas vertex)
+/// closely enough to read as the same affordance, without depending on that
+/// private type. See `MagicLayoutOverlay.bracketGlow`'s doc comment for why
+/// this doesn't need to be pixel-identical.
+private struct HandoverBracketGlyph: Shape {
+    let corner: BracketCorner
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let len = min(rect.width, rect.height)
+        switch corner {
+        case .topLeft:
+            p.move(to: CGPoint(x: rect.minX, y: rect.minY + len))
+            p.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+            p.addLine(to: CGPoint(x: rect.minX + len, y: rect.minY))
+        case .topRight:
+            p.move(to: CGPoint(x: rect.maxX - len, y: rect.minY))
+            p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+            p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + len))
+        case .bottomLeft:
+            p.move(to: CGPoint(x: rect.minX, y: rect.maxY - len))
+            p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+            p.addLine(to: CGPoint(x: rect.minX + len, y: rect.maxY))
+        case .bottomRight:
+            p.move(to: CGPoint(x: rect.maxX - len, y: rect.maxY))
+            p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+            p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - len))
+        }
+        return p
     }
 }
 

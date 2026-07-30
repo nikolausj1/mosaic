@@ -43,6 +43,13 @@ struct SettingsSheet: View {
     /// wrapper onto an `@Observable` class (see the reasoning on
     /// `MagicRevealPreference` itself).
     @State private var revealPreference: MagicRevealPreference = MagicRevealPreference.current
+    /// B32 Phase 3 (Justin, 2026-07-30): mirrors `EditorView`'s own
+    /// `@AppStorage("magicLayoutGhostDemoEnabled")` - both bind the same
+    /// UserDefaults key, which is all a plain Bool toggle needs (unlike
+    /// `revealPreference` above, nothing outside SwiftUI Views reads this
+    /// one, so there's no `@Observable`-class reason to route it through a
+    /// manual UserDefaults wrapper the way `MagicRevealPreference` does).
+    @AppStorage("magicLayoutGhostDemoEnabled") private var ghostDemoEnabled: Bool = true
 
     var body: some View {
         NavigationStack {
@@ -80,13 +87,29 @@ struct SettingsSheet: View {
                     MagicRevealPreference.current = newValue
                 }
 
+                // B32 Phase 3: the pre-existing first-run "ghost gesture
+                // demo" that drags a corner bracket and a divider. The
+                // reveal's handover beat may make it redundant; this toggle
+                // is what lets that question be answered by running the app
+                // both ways rather than guessed at.
+                Section {
+                    Toggle(isOn: $ghostDemoEnabled) {
+                        Text("Ghost gesture demo")
+                            .foregroundStyle(.white)
+                    }
+                    .tint(Color.mosaicAccent)
+                } footer: {
+                    Text("The first-run demo that drags a corner bracket and a divider to show how the editor's gestures work. Only ever plays once, on your very first collage - this just lets you turn it off entirely to compare against the reveal's own handover beat. Off automatically when Reduce Motion is on, regardless of this setting.")
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+                .listRowBackground(Color.mosaicSurface)
+
                 // Replay is user-facing and NOT destructive: it resets a
                 // couple of UserDefaults flags so the welcome and launch
-                // choreography play again. Plenty of shipping apps offer
-                // exactly this ("show the intro again"), and Justin needs it
-                // in Release to review the splash animation on his own phone
-                // without a rebuild each time. Kept OUT of the DEBUG gate
-                // below for that reason.
+                // choreography play again. Justin needs it in Release to
+                // review the splash animation without a rebuild each time,
+                // so it sits OUTSIDE the DEBUG gate that "Clear collages"
+                // still needs.
                 Section {
                     Button {
                         onReplayFirstRun()

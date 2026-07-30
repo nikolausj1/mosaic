@@ -56,6 +56,15 @@ struct EditorView: View {
     /// sheet's replay and `-resetPersistence` both key off this name, so it
     /// stays put even though nothing here is a "coach mark" anymore.
     @AppStorage("hasSeenCoachMarks") private var hasSeenCoachMarks: Bool = false
+    /// B32 Phase 3 (Justin, 2026-07-30): the handover beat may make this demo
+    /// redundant - the divider capsules and corner brackets are now always
+    /// visible AND light up during the reveal itself, so the grammar may
+    /// teach itself (the spec's own open question). Justin needs to compare
+    /// the app WITH the handover and this demo together against the handover
+    /// ALONE, which needs a way to turn just this off - see `SettingsSheet`'s
+    /// "Ghost gesture demo" row. Defaults to `true` (today's behavior,
+    /// unchanged for anyone who never opens this setting).
+    @AppStorage("magicLayoutGhostDemoEnabled") private var ghostDemoEnabled: Bool = true
     @State private var didTriggerGhostDemo = false
     /// Overall visible/hidden for the ghost overlay (fingertip + caption) -
     /// fades in at demo start, fades out at demo end/skip.
@@ -441,6 +450,18 @@ struct EditorView: View {
         guard !didTriggerGhostDemo else { return }
         didTriggerGhostDemo = true
         guard !hasSeenCoachMarks else { return }
+
+        // Settings toggle (see `ghostDemoEnabled`'s doc comment above):
+        // declining here does NOT mark `hasSeenCoachMarks` - flipping the
+        // setting back on should still show the demo on the next fresh pick,
+        // exactly as if this setting had never existed. Checked before
+        // Reduce Motion so the DEBUG timing mark below is meaningful
+        // regardless of which reason a run didn't happen, matching
+        // `MagicLayoutController.begin()`'s own ordering convention.
+        guard ghostDemoEnabled else {
+            MagicTiming.mark("ghost demo declined (Settings: off)")
+            return
+        }
 
         // Reduce Motion: skip the demo entirely and mark it seen - per
         // Justin's brief, "no animation is acceptable teaching cost" here;
