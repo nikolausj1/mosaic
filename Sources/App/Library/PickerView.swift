@@ -152,16 +152,34 @@ final class PickerState {
 
     // MARK: - Lifecycle
 
+    /// The `libraryVersion` this state last completed a `reload()` at, or nil
+    /// if it has never loaded. Compared in `onAppear` so a return from the
+    /// editor costs nothing when the library has not changed underneath us.
+    private var loadedLibraryVersion: Int?
+
     func onAppear() async {
         library.refreshAuthorizationStatus()
         if library.authorizationStatus == .notDetermined {
             await library.requestAccess()
+        }
+        library.beginObservingIfNeeded()
+
+        // `PickerView` is destroyed and rebuilt every time the editor closes
+        // (ContentView swaps on `if let editorState`), so this ran a full
+        // album enumeration plus a sorted whole-library fetch on the main
+        // actor on EVERY back-navigation. That was the lag.
+        //
+        // Skipping is only correct because `libraryVersion` moves on a real
+        // Photos change, so a photo taken in the Camera app still lands.
+        if let loaded = loadedLibraryVersion, loaded == library.libraryVersion, assets.count > 0 {
+            return
         }
         await reload()
     }
 
     func reload() async {
         guard library.authorizationStatus == .authorized || library.authorizationStatus == .limited else { return }
+        defer { loadedLibraryVersion = library.libraryVersion }
         let smart = library.smartAlbums()
         albums = smart
         let recents = smart.first(where: { $0.title == "Recents" })

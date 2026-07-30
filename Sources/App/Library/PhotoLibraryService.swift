@@ -23,8 +23,51 @@ final class PhotoLibraryService {
     private(set) var authorizationStatus: PHAuthorizationStatus
     private let imageManager = PHCachingImageManager()
 
+    /// Bumped once per real Photos-library change. `PickerState` remembers
+    /// the value it last loaded at and skips its reload when the number has
+    /// not moved - which is what makes returning from the editor free.
+    ///
+    /// This counter is the whole reason that skip is SAFE. Without it, "do
+    /// not reload if we already loaded" would mean a photo taken in the
+    /// Camera app never appears until the process restarts.
+    private(set) var libraryVersion = 0
+
+    /// Held so the registration outlives this initializer. Registration is
+    /// deferred until we are actually authorized - see
+    /// `beginObservingIfNeeded()`.
+    private var changeObserver: LibraryChangeObserver?
+
+    /// `PHPhotoLibraryChangeObserver` is an ObjC protocol needing NSObject,
+    /// which `@Observable` cannot be, so the conformance lives here and
+    /// forwards.
+    private final class LibraryChangeObserver: NSObject, PHPhotoLibraryChangeObserver {
+        let onChange: () -> Void
+        init(onChange: @escaping () -> Void) { self.onChange = onChange }
+        func photoLibraryDidChange(_ changeInstance: PHChange) { onChange() }
+    }
+
     init() {
         authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+    }
+
+    deinit {
+        if let changeObserver {
+            PHPhotoLibrary.shared().unregisterChangeObserver(changeObserver)
+        }
+    }
+
+    /// Registered lazily rather than in `init`, because registering before
+    /// the user has granted access is not meaningful. Idempotent, so callers
+    /// can invoke it on every reload without thinking about it.
+    func beginObservingIfNeeded() {
+        guard changeObserver == nil,
+              authorizationStatus == .authorized || authorizationStatus == .limited else { return }
+        let observer = LibraryChangeObserver { [weak self] in
+            // Photos delivers this on an arbitrary queue.
+            Task { @MainActor in self?.libraryVersion &+= 1 }
+        }
+        changeObserver = observer
+        PHPhotoLibrary.shared().register(observer)
     }
 
     func refreshAuthorizationStatus() {
@@ -45,11 +88,29 @@ final class PhotoLibraryService {
     func smartAlbums() -> [AlbumInfo] {
         var result: [AlbumInfo] = []
 
+        // Album counts used to come from `PHAsset.fetchAssets(in:).count`,
+        // one full library fetch PER ALBUM, all of it synchronous and all of
+        // it on the main actor (`PickerState` is `@MainActor`). With thirty
+        // albums that is thirty-one fetches to draw a dropdown the user has
+        // usually not opened - paid on every single return from the editor,
+        // which is the lag Justin reported.
+        //
+        // `estimatedAssetCount` is the API for exactly this: Photos keeps it
+        // alongside the collection, so it costs nothing. It returns
+        // NSNotFound when unavailable (which is normal for some smart
+        // albums), and only then do we fall back to the real fetch.
+        func count(of collection: PHAssetCollection) -> Int {
+            let estimate = collection.estimatedAssetCount
+            guard estimate != NSNotFound else {
+                return PHAsset.fetchAssets(in: collection, options: nil).count
+            }
+            return estimate
+        }
+
         func appendSmartAlbum(_ subtype: PHAssetCollectionSubtype, titleOverride: String?) {
             let fetch = PHAssetCollection.fetchAssetCollections(with: .smartAlbum, subtype: subtype, options: nil)
             fetch.enumerateObjects { collection, _, _ in
-                let count = PHAsset.fetchAssets(in: collection, options: nil).count
-                result.append(AlbumInfo(id: collection.localIdentifier, title: titleOverride ?? collection.localizedTitle ?? "Album", count: count, collection: collection))
+                result.append(AlbumInfo(id: collection.localIdentifier, title: titleOverride ?? collection.localizedTitle ?? "Album", count: count(of: collection), collection: collection))
             }
         }
 
@@ -58,9 +119,12 @@ final class PhotoLibraryService {
 
         let userAlbums = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .albumRegular, options: nil)
         userAlbums.enumerateObjects { collection, _, _ in
-            let count = PHAsset.fetchAssets(in: collection, options: nil).count
-            guard count > 0 else { return }
-            result.append(AlbumInfo(id: collection.localIdentifier, title: collection.localizedTitle ?? "Album", count: count, collection: collection))
+            // Same estimate path as above. The `> 0` guard (hide empty
+            // albums) still holds: an estimate of 0 means empty, and the
+            // NSNotFound fallback returns a real count.
+            let n = count(of: collection)
+            guard n > 0 else { return }
+            result.append(AlbumInfo(id: collection.localIdentifier, title: collection.localizedTitle ?? "Album", count: n, collection: collection))
         }
 
         return result
