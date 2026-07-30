@@ -150,6 +150,67 @@ enum FramingCostWeight {
     static let legibility = 20.0
 }
 
+/// An injectable bundle of `framingCost`'s tunable numbers - the five
+/// `FramingCostWeight` weights plus the two related thresholds
+/// (`minMustKeepAreaCoverage`, `minLegibleFaceHeightFraction`) that shape the
+/// same terms. `FramingCostWeight` itself stays a static enum (existing
+/// callers, existing doc comments, existing tests all reference it directly)
+/// - this struct exists ALONGSIDE it purely so a caller that wants to vary
+/// the weights (Phase 4 tuning, `Tools/LayoutLab`'s sweep harness) can pass a
+/// different set through the decision path without recompiling.
+///
+/// `.current` reproduces today's values exactly, and every function in this
+/// file's decision path (`framingCost`, `faceAwareAssignment`,
+/// `searchDividerFractions`, `chooseCanvasAndLayout`) defaults its new
+/// `weights:` parameter to `.current` - so this is a PURE ADDITION: no
+/// existing caller (App layer included) that doesn't pass `weights:`
+/// explicitly sees any change in behavior or output.
+struct FramingWeights: Equatable {
+    var clip: Double
+    var smallFace: Double
+    var cropLoss: Double
+    var aspect: Double
+    var legibility: Double
+    /// Same number `minMustKeepAreaCoverage` (below) holds today; kept as a
+    /// separate stored value here (rather than reading the global directly)
+    /// so a sweep config can vary it independently of `AutoFrame.swift`'s own
+    /// direct use of that same global, which this struct does NOT touch.
+    var minMustKeepAreaCoverage: Double
+    /// Same number `minLegibleFaceHeightFraction` (below) holds today. Also
+    /// the "cap" the B32 diagnosis refers to: the legibility term's maximum
+    /// possible per-photo contribution is `legibility * minLegibleFaceHeightFraction`
+    /// (2.4 at today's values) - raising THIS, not `legibility`, raises that
+    /// cap without moving the weight the diagnosis already showed causes new
+    /// clips.
+    var minLegibleFaceHeightFraction: Double
+
+    /// Today's values, unchanged - see this struct's own doc comment. Reads
+    /// the two global thresholds via `framingCostDefaultAreaCoverage`/
+    /// `framingCostDefaultLegibleFaceHeightFraction` (declared below, aliased
+    /// under a different name) rather than the bare global names directly:
+    /// inside this type's own body, an unqualified `minMustKeepAreaCoverage`
+    /// resolves to THIS struct's own stored property of the same name (a
+    /// static-initializer-time compile error: "instance member... property
+    /// initializers run before 'self' is available"), not the file-scope
+    /// `let` - the alias sidesteps that name collision without renaming
+    /// either global (which `AutoFrame.swift` also reads directly).
+    static let current = FramingWeights(
+        clip: FramingCostWeight.clip,
+        smallFace: FramingCostWeight.smallFace,
+        cropLoss: FramingCostWeight.cropLoss,
+        aspect: FramingCostWeight.aspect,
+        legibility: FramingCostWeight.legibility,
+        minMustKeepAreaCoverage: framingCostDefaultAreaCoverage,
+        minLegibleFaceHeightFraction: framingCostDefaultLegibleFaceHeightFraction
+    )
+}
+
+/// Aliases for `minMustKeepAreaCoverage`/`minLegibleFaceHeightFraction`
+/// (declared below) used only by `FramingWeights.current` above - see that
+/// property's own comment for why a direct reference does not compile.
+private let framingCostDefaultAreaCoverage = minMustKeepAreaCoverage
+private let framingCostDefaultLegibleFaceHeightFraction = minLegibleFaceHeightFraction
+
 /// Minimum rendered face height, expressed as a fraction of the CANVAS's own
 /// short edge (not the cell's - a fraction of the cell would cancel out
 /// exactly the effect this term exists to produce, since a bigger cell would
@@ -218,7 +279,10 @@ func framingCost(
     photoPixelSize: CGSize,
     cellSize: CGSize,
     canvasShortEdge: Double = defaultReferenceShortEdge,
-    smallestFaceHeightFraction: Double? = nil
+    smallestFaceHeightFraction: Double? = nil,
+    // See `FramingWeights`'s own doc comment: defaults to today's values
+    // exactly, so every existing caller is unaffected.
+    weights: FramingWeights = .current
 ) -> Double {
     guard mustKeep.width > 0, mustKeep.height > 0,
           cellSize.width > 0, cellSize.height > 0,
@@ -249,7 +313,7 @@ func framingCost(
         // one axis. Severity: how far under 1.0 the boundary zoom falls,
         // clamped to keep the penalty bounded and comparable across cases.
         let severity = min(1.0, 1.0 - tightestSafeZoom)
-        cost += FramingCostWeight.clip * severity
+        cost += weights.clip * severity
     } else {
         // Safe to frame this tightly. Area-coverage proxy for "does the
         // must-keep region fill the frame or get lost in a lot of empty
@@ -263,22 +327,22 @@ func framingCost(
         let resultingVisW = visW1 / tightestSafeZoom
         let resultingVisH = visH1 / tightestSafeZoom
         let areaCoverage = (mustKeepW * mustKeepH) / (resultingVisW * resultingVisH)
-        if areaCoverage < minMustKeepAreaCoverage {
-            cost += FramingCostWeight.smallFace * (minMustKeepAreaCoverage - areaCoverage)
+        if areaCoverage < weights.minMustKeepAreaCoverage {
+            cost += weights.smallFace * (weights.minMustKeepAreaCoverage - areaCoverage)
         }
 
         // Excess zoom past the app's own established auto-zoom ceiling
         // (2.0x) - the crop is safe, but reaching it required cropping in
         // further than the app itself otherwise considers reasonable.
         let excessZoom = max(0.0, tightestSafeZoom - 2.0)
-        cost += FramingCostWeight.cropLoss * excessZoom
+        cost += weights.cropLoss * excessZoom
     }
 
     // Aspect mismatch between the must-keep region's own shape and the
     // cell's, independent of zoom - same log-distance shape
     // `contentFitAssignment` already uses for photo-vs-cell aspect.
     let mustKeepAspect = mustKeepW / mustKeepH
-    cost += FramingCostWeight.aspect * abs(log(mustKeepAspect) - log(cellAspect))
+    cost += weights.aspect * abs(log(mustKeepAspect) - log(cellAspect))
 
     // The group-photo-cell-size term (see this function's own doc comment
     // for the derivation of why THIS term, alone among the others, can
@@ -304,8 +368,8 @@ func framingCost(
             // quantity this whole function has been missing.
             let renderedFaceHeightPoints = smallestFaceHeightFraction * cellSize.height / resultingVisHForFace
             let renderedFaceHeightFraction = renderedFaceHeightPoints / canvasShortEdge
-            let deficit = max(0.0, minLegibleFaceHeightFraction - renderedFaceHeightFraction)
-            cost += FramingCostWeight.legibility * deficit
+            let deficit = max(0.0, weights.minLegibleFaceHeightFraction - renderedFaceHeightFraction)
+            cost += weights.legibility * deficit
         }
     }
 
@@ -370,7 +434,10 @@ func faceAwareAssignment(
     // no entry here, same as it does when the photo has no face at all).
     mustKeepFaceHeights: [PhotoID: Double] = [:],
     canvasSize: CGSize,
-    border: BorderStyle
+    border: BorderStyle,
+    // See `FramingWeights`'s own doc comment: defaults to today's values, so
+    // every existing caller (App layer included) is unaffected.
+    weights: FramingWeights = .current
 ) -> FaceAwareAssignment {
     precondition((2...4).contains(photos.count), "faceAwareAssignment supports 2...4 photos")
 
@@ -422,7 +489,8 @@ func faceAwareAssignment(
             mustKeepRegions: mustKeepRegions,
             mustKeepFaceHeights: mustKeepFaceHeights,
             canvasSize: canvasSize,
-            border: border
+            border: border,
+            weights: weights
         )
 
         // PHASE 2 (see `searchDividerFractions`'s own comment): let this
@@ -439,7 +507,8 @@ func faceAwareAssignment(
             mustKeepRegions: mustKeepRegions,
             mustKeepFaceHeights: mustKeepFaceHeights,
             canvasSize: canvasSize,
-            border: border
+            border: border,
+            weights: weights
         )
 
         if finalCost < bestCost {
@@ -467,7 +536,8 @@ private func bestPermutationAndCost(
     mustKeepRegions: [PhotoID: CGRect],
     mustKeepFaceHeights: [PhotoID: Double],
     canvasSize: CGSize,
-    border: BorderStyle
+    border: BorderStyle,
+    weights: FramingWeights = .current
 ) -> (permutation: [PhotoID], cost: Double) {
     let (cells, _) = solve(root: template, canvasSize: canvasSize, border: border)
     let cellByID = Dictionary(uniqueKeysWithValues: cells.map { ($0.id, $0.rect) })
@@ -497,13 +567,14 @@ private func bestPermutationAndCost(
                     photoPixelSize: pixelSize,
                     cellSize: cellSize,
                     canvasShortEdge: canvasShortEdge,
-                    smallestFaceHeightFraction: mustKeepFaceHeights[photoID]
+                    smallestFaceHeightFraction: mustKeepFaceHeights[photoID],
+                    weights: weights
                 )
             } else {
                 let cellAspect = aspect(cellSize)
                 let photoAspect = aspect(photoSizes[photoID] ?? CGSize(width: 1, height: 1))
                 guard photoAspect > 0, cellAspect > 0 else { continue }
-                cost += FramingCostWeight.aspect * abs(log(photoAspect) - log(cellAspect))
+                cost += weights.aspect * abs(log(photoAspect) - log(cellAspect))
             }
         }
         magicLayoutEvaluationCount += 1
@@ -718,7 +789,8 @@ private func searchDividerFractions(
     mustKeepRegions: [PhotoID: CGRect],
     mustKeepFaceHeights: [PhotoID: Double],
     canvasSize: CGSize,
-    border: BorderStyle
+    border: BorderStyle,
+    weights: FramingWeights = .current
 ) -> (template: Node, permutation: [PhotoID], cost: Double) {
     let sites = dividerSearchSites(in: template)
     guard !sites.isEmpty else { return (template, authoredPermutation, authoredCost) }
@@ -749,7 +821,8 @@ private func searchDividerFractions(
                 mustKeepRegions: mustKeepRegions,
                 mustKeepFaceHeights: mustKeepFaceHeights,
                 canvasSize: canvasSize,
-                border: border
+                border: border,
+                weights: weights
             )
             if cost < bestCostForSite {
                 bestCostForSite = cost
@@ -849,7 +922,10 @@ func chooseCanvasAndLayout(
     mustKeepFaceHeights: [PhotoID: Double] = [:],
     border: BorderStyle,
     userRatio: Ratio? = nil,
-    referenceShortEdge: Double = defaultReferenceShortEdge
+    referenceShortEdge: Double = defaultReferenceShortEdge,
+    // See `FramingWeights`'s own doc comment: defaults to today's values, so
+    // every existing caller (App layer included) is unaffected.
+    weights: FramingWeights = .current
 ) -> MagicLayoutDecision {
     precondition((2...4).contains(photos.count), "chooseCanvasAndLayout supports 2...4 photos")
 
@@ -861,7 +937,8 @@ func chooseCanvasAndLayout(
             mustKeepRegions: mustKeepRegions,
             mustKeepFaceHeights: mustKeepFaceHeights,
             canvasSize: canvasSize,
-            border: border
+            border: border,
+            weights: weights
         )
     }
 
