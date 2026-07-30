@@ -44,6 +44,50 @@ final class EditorState {
     let photoStore: PhotoStore
     private(set) var layoutIndex: Int
 
+    // MARK: - Feedback capture (before-snapshot)
+
+    /// The `Document` exactly as the app chose it, captured ONCE at
+    /// `ContentView.commitNewCollage` time - before any gesture, tray, or
+    /// Replace could touch it. This is the whole point of the on-device
+    /// feedback-capture feature (see `Sources/App/Feedback/FeedbackCapture.swift`):
+    /// the owner corrects a layout by hand, and the developer needs to see
+    /// what the algorithm ACTUALLY produced, not a live document that may
+    /// already have been edited by the time anyone thinks to look at it.
+    /// `let`, never reassigned after init - undo/redo, Replace, and every
+    /// other mutation touch `document` only.
+    ///
+    /// Nil in exactly two cases, both honest: (1) a cold-launch restore
+    /// (`ContentView.restoreEditor`) - current.json is the only Document
+    /// disk ever had, and it may already reflect edits from a prior session,
+    /// so there is no genuine "as-chosen" moment left to snapshot; (2) the
+    /// `-protoLayout` debug launch arg - a bundled-photo path with no real
+    /// pick flow behind it. `FeedbackCapture.swift` NEVER falls back to the
+    /// live `document` when this is nil - it writes `beforeAvailable: false`
+    /// to the manifest instead, per the brief: silently writing the current
+    /// document into `before.json` would look like the algorithm agreed with
+    /// the user when it did not, which is worse than useless.
+    let capturedBeforeDocument: Document?
+    /// The exact `images` dict passed to this initializer at commit time -
+    /// a second, independent dict of references to the SAME UIImage
+    /// instances (cheap: no pixel data is copied, just dictionary storage
+    /// for a handful of object pointers). Needed because `images` itself is
+    /// mutable going forward (`replace(...)` overwrites an entry with a
+    /// freshly-picked asset's bitmap, discarding the old one - see its own
+    /// doc comment) - without this separate snapshot, rendering
+    /// `capturedBeforeDocument` later via `CollageRenderer` could silently
+    /// show the WRONG (post-replace) photo in a cell whose JSON still
+    /// describes the original crop.
+    let capturedBeforeImages: [PhotoID: UIImage]?
+    /// `MagicLayoutDecision.templateIndex` at commit time - the layout the
+    /// face-aware search actually chose. NOT the same thing as `layoutIndex`
+    /// above, which the user's own Layout-tray taps mutate afterward; this
+    /// one is frozen at the moment of the original decision, exactly like
+    /// `capturedBeforeDocument`.
+    let capturedTemplateIndex: Int?
+    /// `MagicLayoutDecision.cost` at commit time - the winning candidate's
+    /// framing cost, for the feedback bundle's manifest.
+    let capturedDecisionCost: Double?
+
     // MARK: - Export / Save (Phase 5)
 
     /// True for the duration of a Save: gates the canvas (EditorView overlays
@@ -135,11 +179,19 @@ final class EditorState {
 
     private var gestureStartDocument: Document?
 
-    init(document: Document, images: [PhotoID: UIImage], photoStore: PhotoStore, layoutIndex: Int) {
+    init(
+        document: Document, images: [PhotoID: UIImage], photoStore: PhotoStore, layoutIndex: Int,
+        beforeDocument: Document? = nil, beforeImages: [PhotoID: UIImage]? = nil,
+        capturedTemplateIndex: Int? = nil, capturedDecisionCost: Double? = nil
+    ) {
         self.document = document
         self.images = images
         self.photoStore = photoStore
         self.layoutIndex = layoutIndex
+        self.capturedBeforeDocument = beforeDocument
+        self.capturedBeforeImages = beforeImages
+        self.capturedTemplateIndex = capturedTemplateIndex
+        self.capturedDecisionCost = capturedDecisionCost
         self.derivedSwatches = Self.computeSampledSwatches(document: document, images: images)
         // `didSet` doesn't fire for this initializer's own assignment above
         // (Swift property-observer semantics) - schedule the first autosave

@@ -620,7 +620,8 @@ final class PickerState {
             orderedPhotoIDs: idsInOrder,
             assetIDByPhotoID: assetByID.mapValues(\.localIdentifier),
             faceRectsByPhotoID: faceRectsByPhotoID,
-            templateIndex: decision.templateIndex
+            templateIndex: decision.templateIndex,
+            cost: decision.cost
         )
     }
 }

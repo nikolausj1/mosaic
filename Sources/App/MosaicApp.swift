@@ -148,7 +148,7 @@ struct ContentView: View {
     /// beat is about to need), THEN hand the result to the overlay, which is
     /// already on screen covering the swap.
     private func adoptPickCompletion(_ completion: PickCompletion) {
-        commitNewCollage(document: completion.document, images: completion.images)
+        commitNewCollage(completion: completion)
         // On the bypassed path (Reduce Motion / `-magicLayoutOff`) this mark
         // IS the whole user-visible wait - i.e. today's spinner baseline that
         // the sequence's own "overlay done" is measured against.
@@ -168,9 +168,21 @@ struct ContentView: View {
     /// current.json (if any) is archived to last.json - not deleted - before
     /// the new document is adopted, so confirming a new pick supersedes the
     /// in-flight collage rather than discarding it.
-    private func commitNewCollage(document: Document, images: [PhotoID: UIImage]) {
+    private func commitNewCollage(completion: PickCompletion) {
         DocumentStore.archiveCurrentAsLast()
-        let state = EditorState(document: document, images: images, photoStore: PhotoStore(), layoutIndex: 0)
+        // Feedback capture (see Sources/App/Feedback/FeedbackCapture.swift):
+        // this is the ONE moment the as-built Document exists before any
+        // edit can touch it - `completion.document`/`completion.images` are
+        // stashed into EditorState alongside the live copy it's about to
+        // start mutating, mirroring the undo stack's own "snapshot before
+        // mutation" pattern. Every other EditorState construction site
+        // (restore, -protoLayout) leaves these nil - honestly, there is no
+        // as-chosen moment to snapshot there.
+        let state = EditorState(
+            document: completion.document, images: completion.images, photoStore: PhotoStore(), layoutIndex: 0,
+            beforeDocument: completion.document, beforeImages: completion.images,
+            capturedTemplateIndex: completion.templateIndex, capturedDecisionCost: completion.cost
+        )
         // Fresh-pick arrivals open with the Layout tray up (Justin,
         // 2026-07-17): choosing the topology is the natural first move
         // after choosing photos. Cold-launch restore (`restoreEditor` below)

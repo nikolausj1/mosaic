@@ -406,6 +406,17 @@ struct EditorView: View {
 
                 Spacer()
 
+                // Feedback capture (Sources/App/Feedback/FeedbackCapture.swift):
+                // reachable right here, next to Save, deliberately - it must
+                // capture whatever collage is on screen at tap time,
+                // including edits just made, and the whole point of this
+                // control is that it's one tap away without leaving the
+                // editor. Quiet icon-only styling (same white-0.4-opacity
+                // treatment PickerView's own settings gear uses) so it never
+                // competes with Save's solid accent capsule for attention.
+                FeedbackCaptureButton(state: state)
+                    .padding(.trailing, 4)
+
                 Button {
                     Task { await performSave() }
                 } label: {

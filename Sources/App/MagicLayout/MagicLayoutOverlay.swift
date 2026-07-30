@@ -123,6 +123,14 @@ struct PickCompletion {
     /// with (possibly) different fraction values at the same paths - exactly
     /// what the handover needs to compare.
     var templateIndex: Int
+    /// `MagicLayoutDecision.cost` - the winning `faceAwareAssignment` cost at
+    /// the chosen canvas ratio. Feedback-capture bookkeeping (see
+    /// `Sources/App/Feedback/FeedbackCapture.swift`): the on-device capture
+    /// bundle's manifest reports this as "decision metadata" alongside
+    /// `templateIndex` above, so the developer can see not just WHICH layout
+    /// the algorithm picked but how confident it was. Not consumed by the
+    /// reveal/handover beat itself - purely additive.
+    var cost: Double
 }
 
 // MARK: - Render model
