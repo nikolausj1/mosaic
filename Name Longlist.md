@@ -1,146 +1,161 @@
 ---
-title: "Name Longlist - 92 candidates across eight territories"
+title: "Name Longlist v2 - 102 candidates, audited for search winnability"
 created: 2026-07-29
 modified: 2026-07-29
-version: 1.0
+version: 2.0
 author: Claude Opus 5 (claude-opus-5)
 tags:
 ---
 
-# Name Longlist
+# Name Longlist v2
 
-Eight territories, one namer each so the range is real rather than one voice repeated. Every editorial line names the catch as well as the appeal.
+Rebuilt around the rule from appbot.co: a name you cannot rank for is a name nobody can find. They named an app "Morph", could not rank for their own name against 229 competitors, and a beta user could not find it by searching. Renaming to "Metamorph" took keyword difficulty from 97 to 8.
 
-**Only the "Already Screened" group at the bottom has been through an availability and trademark pass.** Everything above it is unvalidated. Browsable version: https://claude.ai/code/artifact/3c8cae82-3bcf-443f-8e3d-b066baaa8524
+So common English words are disqualified here however lovely, and every candidate was also tested against the 2025 ASO guidance: 30 character title, three words maximum, spellable after one hearing, and survives "Hey Siri, open ___".
 
-# Mosaic World
+**WINNABLE** the search shelf is genuinely open. **CONTESTED** lovely, but you would be fighting for it. **UNAUDITED** carried from earlier rounds, passes the common-word bar but not re-checked here.
 
-Names borrowed from the craft of laying tesserae, either directly or bent enough to escape the App Store blur tools.
+Browsable version: https://claude.ai/code/artifact/6486c13e-b297-4fad-abd9-b98e874b42d5
 
-**Mosaico** - `Mosaico: Photo Collage` (23) - The Italian word, warm and craftsman-ish, though search still matches the first six letters so the censorship apps stay your neighbors.
-**Mosaicist** - `Mosaicist: Photo Collage` (25) - Names the person who lays the pieces rather than the finished picture, which is exactly what the app does for you, at the cost of four syllables and the same search stem.
-**Emblema** - `Emblema: Photo Collage` (23) - In Roman work the emblema was the fine panel assembled in its own tray then set into the floor, so it names a small finished thing worth keeping, but English ears hear "emblem" first.
-**Andamento** - `Andamento: Photo Collage` (25) - The flow of the tile courses, the decision a mosaicist makes before a single piece is bedded, which is your engine rather than your output, but four syllables and nobody outside the craft knows it.
-**Musaica** - `Musaica: Photo Collage` (23) - Muse and mosaic fused, soft and faintly literary, with a changed vowel that genuinely escapes the blur-tool search results, though half the room will type Mos- before Mus-.
-**Sectile** - `Sectile: Photo Collage` (23) - Opus sectile built pictures from cut shapes fitted edge to edge instead of uniform cubes, which is your split tree in one Latin word, though it is cold and near-homophonous with "sextile".
-**Mozaika** - `Mozaika: Photo Collage` (23) - The Slavic spelling, the only form here that fully escapes the censorship search results, but heard aloud it is a three-way coin flip on spelling.
-**Musiva** - `Musiva: Photo Collage` (22) - Opus musivum is the Latin that mosaic descended from, so it hands you the whole world without the poisoned keyword, though it drifts toward music and muse.
-**Sinopia** - `Sinopia: Photo Collage` (23) - The red underdrawing on the setting bed, the plan the picture gets laid onto, which is exact for an engine that decides before it places and unknown to essentially everyone.
-**Grout** - `Grout: Photo Collage` (21) - Your border is grout, a confident plain-English move with a great short icon and zero spelling risk, but half the room thinks bathroom before Ravenna.
-**Torcello** - `Torcello: Photo Collage` (24) - The lagoon church whose mosaics people go quiet in front of, with a good bounce in the mouth, obscure enough that most will read it as an invented Italian brand.
-**Interstice** - `Interstice: Photo Collage` (26) - The gap between the tesserae, so it names your border with real precision, but it is academic and asks the listener to work before they feel anything.
-**Ravenna** - `Ravenna: Photo Collage` (23) - The city where the craft peaked, warm and effortless to say and spell, but a place name carries no meaning about photos so it leans hard on the tail.
-**Mosaicry** - `Mosaicry: Photo Collage` (24) - Formed like tapestry and carpentry so it names the craft rather than the output, though it is coined and most people stumble on the third syllable first time.
-**Mosaicon** - `Mosaicon: Photo Collage` (24) - Mosaic with a Greek ending that turns a technique into an object, clean and confident, but the -on tail reads faintly like a software component.
+## The finding that reshaped this round
 
-# Joinery and Inlay
+Apple PREFIX-MATCHES in App Store search. Every "Mosaic plus a suffix" name therefore inherits the blur-and-pixelate shelf whole, which kills Mosaicist, Mosaica, Mosaico and Mosaicon as ways to keep the word. Only forms that change the LEADING token escape: Neomosaic, Micromosaic, Lumosaic, and the differently-spelled Mozaika and Musaica.
 
-Names from trades where a picture is made only of pieces cut and fitted, which is the no-generation argument stated as a noun.
 
-**Kumiko** - `Kumiko: Photo Collage` (22) - Japanese lattice joinery held together by geometry alone, no nails and no glue, true whether you feed it two photos or twelve, and exactly the craft story Apple editorial writes about, though most Western customers need the meaning explained once.
-**Marquetry** - `Marquetry: Photo Collage` (25) - The craft where a picture is nothing but pieces cut and fitted flush, the truest one-word statement of what the app does, undone slightly by people typing marketry or marquetery.
-**Intarsia** - `Intarsia: Photo Collage` (24) - Wood inlay where the image is the fitted pieces themselves, your differentiator as a noun and in the same Italian register as Mosaico, though knitters have half-claimed it.
-**Ashlar** - `Ashlar: Photo Collage` (22) - Dressed stone laid so tight you cannot slide a blade into the joint, an unusual and ownable sound, but cold and architectural with no warmth for screenshots.
-**Pietra** - `Pietra: Photo Collage` (22) - Short for pietra dura, hard-stone inlay cut so precisely you cannot find the seams, soft and easy to say, but stripped of dura it just means stone.
-**Chamfer** - `Chamfer: Photo Collage` (23) - The small angle a maker cuts so two pieces meet without a ragged edge, crisp and modern for a minimal icon, but it names a detail rather than the object.
-**Casework** - `Casework: Photo Collage` (24) - The cabinetmaker's term for fitted built-in work, with a nice second reading that the app makes a case for each photo, but social work is the first meaning most people hear.
-**Fretwork** - `Fretwork: Photo Collage` (24) - Pierced lattice panels where the pattern comes from how the piece is divided, a handsome word, though the first syllable means worry.
-**Wainscot** - `Wainscot: Photo Collage` (24) - Panels fitted edge to edge across a wall, old and charming and entirely unclaimed by any app, but it reads home renovation before photography.
-**Parquet** - `Parquet: Photo Collage` (23) - Everyone has stood on parquet and understood instantly that it is a surface made of pieces meeting with no gap, but flooring is the first association and Apache Parquet owns technical search.
+## Mosaic-extended
 
-# Darkroom and Light
+**Micromosaic** - `Micromosaic: Collage` (20/30) - [WINNABLE] - A genuine art-history term for pictures built from tiny tesserae, six results and no misspelling risk, though "micro" is the wrong promise for an app whose whole point is a full-resolution export.
+**Neomosaic** - `Neomosaic: Photo Collage` (24/30) - [WINNABLE] - Zero search results and no spelling fork at all, so it keeps the word he loves while staying findable, and the only real cost is that "neo" dates the app the moment something newer arrives.
+**Remosaic** - `Remosaic: Photo Collage` (23/30) - [WINNABLE] - Zero results, spells itself on first hearing, verbs without effort, but in camera-sensor engineering "remosaic" means rebuilding pixels, which is precisely the claim this app must never make.
 
-Photographic-craft names that claim the darkroom register and, quietly, the on-device promise.
+## Rare-craft
 
-**Safelight** - `Safelight: Photo Collage` (25) - The dim amber lamp you can work under without ruining the paper, which claims darkroom craft and on-device privacy at once, though some will hear safety and expect parental controls.
-**Easel** - `Easel: Photo Collage` (21) - In a darkroom the easel holds the paper flat and sets the white border, very nearly a description of your app, but most people picture a painter's tripod first.
-**Photogram** - `Photogram: Photo Collage` (25) - Made by arranging things on light-sensitive paper with no camera and nothing invented, the cleanest statement of what this app is, though it sits one letter from photograph and one syllable from Instagram.
-**Latent** - `Latent: Photo Collage` (22) - The latent image is already in the film waiting to be brought out, a lovely argument that the app invents nothing, undercut by latent space now being standard AI vocabulary.
-**Bellows** - `Bellows: Photo Collage` (23) - The accordion that stretches to change what fits in the frame, which maps neatly onto your corner drag, but outside view-camera circles people think fireplaces.
-**Baryta** - `Baryta: Photo Collage` (22) - The brilliant white coating on fibre-base paper, which is literally the border your app draws, but spelling it after one hearing is a coin flip.
-**Deckle** - `Deckle: Photo Collage` (22) - The soft irregular edge on hand-made paper and old snapshot prints, quietly about the border users actually adjust, though it belongs more to papercraft than optics.
-**Emulsion** - `Emulsion: Photo Collage` (24) - The layer that actually receives the image, materially honest and comfortable beside Darkroom and Filmic, but in Britain it means wall paint.
-**Groundglass** - `Groundglass: Collage` (20) - The screen where a picture is composed before it is ever taken, so it is about arrangement rather than effects, but as one word it reads like a typo and it is deep inside baseball.
-**Penumbra** - `Penumbra: Photo Collage` (24) - The soft outer edge of a shadow, cold and editorial and right on a dark icon, but pure mood that says nothing about arranging photographs.
-**Loupe** - `Loupe: Photo Collage` (21) - The magnifier you put over frames when choosing which to keep, so it says selection rather than generation, but Lightroom already names a view mode this and people will spell it loop.
+**Cosmati** - `Cosmati: Photo Collage` (22/30) - [WINNABLE] - The Roman families who set marble into geometric fields, flattering lineage for a layout engine and clean in the store, but the sound sits a half step from cosmetic and Siri may hand back cosmetics results.
+**Intarsia** - `Intarsia: Photo Collage` (23/30) - [WINNABLE] - Wood inlay where shaped pieces meet with no gaps, and it spells better than it looks because -sia is a familiar English ending, though knitting has claimed the word culturally.
+**Kigumi** - `Kigumi: Photo Collage` (21/30) - [WINNABLE] - A wooden frame fitted together, soft, short, and completely unclaimed, with total opacity in English and an unstressed first vowel that some people will guess wrong.
+**Kumiko** - `Kumiko: Photo Layout` (20/30) - [WINNABLE] - Japanese lattice joinery that holds without glue, short, warm, and phonetically transparent so it types correctly after one hearing, with the single caveat that it is a common Japanese given name and any user with that contact gets a person instead of an app.
+**Lapidary** - `Lapidary: Photo Collage` (23/30) - [WINNABLE] - A stone-cutter's word that promises careful fitting and nothing invented, search-clean and expensive-sounding, with the -ary versus -ery ending as its one live typing fork.
+**Sashimono** - `Sashimono: Collage` (18/30) - [WINNABLE] - Japanese cabinetry assembled without nails, unclaimed and mostly recoverable by ear, with the length and the inevitable sashimi joke as the price.
+**Yosegi** - `Yosegi: Photo Collage` (21/30) - [WINNABLE] - Patterned woodwork made of many small fitted pieces, short and pleasant and effectively unclaimed, but the written form reads back as "yo-SEE-jee" to English eyes so the spoken and typed names can diverge.
+**Andamento** - `Andamento: Collage` (18/30) - [CONTESTED] - The flowing lines along which tesserae are set, which names the movement in the reveal rather than the output, but it is everyday business filler in Italian and Portuguese and already in the store as "Andamento da Obra".
+**Emblema** - `Emblema: Photo Collage` (22/30) - [CONTESTED] - The fine central panel of a Roman mosaic, the part with the faces in it, which makes it the most on-point word in the territory, but it is an ordinary noun in Spanish, Italian and Portuguese so those stores are unwinnable.
 
-# Composition
+## Coined
 
-Names borrowed from typesetting, printing and music, where arrangement is the entire discipline.
+**Bracketry** - `Bracketry: Photo Collage` (24/30) - [WINNABLE] - The corner-bracket ratio drag turned into a real and rare English word with "bracket" as a known stem to anchor the spelling, and the only fork is Bracketery, but it sounds like shelf hardware.
+**Lumosaic** - `Lumosaic: Photo Collage` (23/30) - [WINNABLE] - Light poured into mosaic, aimed straight at the reveal, and the mosaic is audible enough that the correct spelling is the first guess, though the Lumos echo is worth a trademark check before you commit.
+**Fittery** - `Fittery: Photo Collage` (22/30) - [CONTESTED] - A workshop where things are fitted, which is the entire app stated without a single AI word, and English stress rules push people to the double t, but it has a live namesake pull and is a touch twee.
+**Splitlight** - `Splitlight: Photo Collage` (25/30) - [CONTESTED] - The split-tree layout and the reveal glow in one unmisspellable pair, but the tokenizer drops it into the flashlight shelf, so the pairing has to carry you and never the parts.
 
-**Compositor** - `Compositor: Photo Collage` (26) - The person who sets type into the frame by hand, which is exactly what the app does with photos, though visual-effects people hear compositing and may expect blending.
-**Assemblage** - `Assemblage: Photo Collage` (26) - Art made by arranging things you already have, the entire thesis in one word, gallery-ish in the good way, but three syllables of French that people misspell.
-**Stanza** - `Stanza: Photo Collage` (22) - A set of lines arranged as a block, which describes a collage without saying photo, short and easy to spell, though longtime iPhone users remember the ebook reader.
-**Fugue** - `Fugue: Photo Collage` (21) - One subject entering voice by voice, uncannily close to your reveal lighting each face in turn, but fugue state, and many will mispronounce it once.
-**Justify** - `Justify: Photo Collage` (23) - The typesetter's verb for making content fit its frame exactly, which is literally what the layout engine does, though the moral sense reads defensive.
-**Ensemble** - `Ensemble: Photo Collage` (24) - Separate voices arranged to sound like one thing, warm rather than technical, but it also means an outfit so it drifts toward fashion.
-**Consort** - `Consort: Photo Collage` (23) - A group of like instruments playing together, an old quiet word that sounds expensive, though most people reach for the royal spouse first.
-**Kern** - `Kern: Photo Collage` (20) - Kerning is the craft of the space between things, which is exactly what your borders and dividers are, but it names the gap not the arrangement and non-designers hear a surname.
-**Imposition** - `Imposition: Photo Collage` (26) - The printer's term for arranging pages on a sheet so they land right when folded, the most technically accurate name here, but in ordinary English it means a burden.
-**Syntax** - `Syntax: Photo Collage` (22) - It literally means arranged together and a split tree genuinely is a grammar of frames, but most people read programming, which is cold in a photo app.
-**Counterpoint** - `Counterpoint: Collage` (21) - Independent lines holding together without merging, fair for photos that keep their own faces while sharing a frame, but long and it everyday-means disagreement.
+## Compounds
 
-# Warmth and Keeping
+**Cornerwise** - `Cornerwise: Collage` (19/30) - [WINNABLE] - It teaches the diagonal corner-bracket gesture by name, six results and no spelling or voice risk at all, but you are naming a single control rather than the app.
+**Edgewise** - `Edgewise: Photo Collage` (23/30) - [WINNABLE] - A real adverb about edges and about getting something in, which suits an app whose craft is where one photo stops, clean to hear, spell and say, but the bare word tells a stranger nothing about photos.
+**Groutline** - `Groutline: Photo Collage` (24/30) - [WINNABLE] - The seam between tiles is exactly the border control you ship, making this the most literally accurate name here, twenty-five results with no namehits and no photo apps among them, and it is simply unlovely under an icon.
+**Keepstill** - `Keepstill: Photo Collage` (24/30) - [WINNABLE] - What you say right before the shutter, closed up into something that sounds like a keepsake, four results and unmisspellable, with a soft Siri pull toward Google Keep for anyone who has it installed.
+**Laystone** - `Laystone: Photo Collage` (23/30) - [WINNABLE] - Setting stones by hand, which delivers the mosaic idea without the poisoned word, zero search results and no spelling fork, but it reads heavy for an app about pictures of people you love.
+**Eyeline** - `Eyeline: Photo Collage` (22/30) - [CONTESTED] - The film term for where a subject is looking, close to what the scorer preserves and effortless to say, but iOS autocomplete finishes it as "eyeliner" and drops the user into a vast beauty category.
+**Headroom** - `Headroom: Photo Collage` (23/30) - [CONTESTED] - The framing term for the space above a subject's head is the literal quantity your scorer protects, spelling and voice clean, but two of the six namehits are AI apps and Max Headroom is the worst possible echo for "invents nothing".
+**Lampblack** - `Lampblack: Photo Collage` (24/30) - [CONTESTED] - The oldest pigment there is, soot off a lamp, and it sounds like the small serious studio Apple editorial responds to, spelling-clean but disconnected from arranging photographs and dragged by the same light shelf.
+**Lightfast** - `Lightfast: Photo Collage` (24/30) - [CONTESTED] - A printer's word for pigment that will not fade, quietly claiming the full-resolution export and the preserved date and place, spelling-clean but pulled by the huge flashlight shelf and known only to painters.
+**Rimlight** - `Rimlight: Photo Collage` (23/30) - [CONTESTED] - The light tracing the edge of a subject is the same gesture as your reveal glow, so it names the app's best moment, at the cost of a flashlight-shelf pull and one mild slang smirk.
+**Safelight** - `Safelight: Photo Collage` (24/30) - [CONTESTED] - The darkroom lamp you can work under without ruining the print, which is precisely the promise of a layout engine that refuses to cut a face, spelling-clean but sharing the store with two darkroom-timer apps.
+**Shadowline** - `Shadowline: Collage` (19/30) - [CONTESTED] - The architect's deliberate gap between two surfaces, which is exactly what your border is, spelling-clean but held by a comics imprint and an apparel label, and "shadow" hints at editing you do not do.
+**Sidelight** - `Sidelight: Collage` (18/30) - [CONTESTED] - Both a lighting term and the narrow window beside a door, calm and easy to type, but it is pleasant without being pointed and the store is thick with light names.
+**Tilework** - `Tilework: Photo Collage` (23/30) - [CONTESTED] - The plain English word for mosaic craft, so nobody has to learn it and nobody can misspell it, but the tile token walks you into the grid-app fight with PhotoGrid, which is the one fight you cannot win.
 
-Names about why anyone makes a collage at all, aimed at the family shelf rather than the tool aisle.
+## Wonder
 
-**Heirloom** - `Heirloom: Photo Collage` (24) - It claims the picture you make is worth keeping, which the app earns by carrying the earliest photo's date and place into the export, though it leans antique for something used on a Tuesday.
-**Mantel** - `Mantel: Photo Collage` (22) - It names the exact place a finished family picture ends up, furniture rather than filter, but heard aloud half of people will type M-A-N-T-L-E.
-**Kindred** - `Kindred: Photo Collage` (23) - It says these pictures belong to each other before it says anything about software, calm and grown-up, but it points at the people and none of the making.
-**Altogether** - `Altogether: Photo Collage` (26) - It names the moment everyone is finally in one frame without ever counting how many, permanently clear of the grid trap, though it can read as an adverb and it is long.
-**Reunion** - `Reunion: Photo Collage` (23) - It describes the actual event inside the app, separate pictures finally standing in one frame, warm without tipping cute, but it may feel oversized for two snapshots.
-**Kinship** - `Kinship: Photo Collage` (23) - Warmer and more explicit than Kindred while still sounding like a small studio, though slightly abstract with a faint therapy-brochure tone.
-**Trove** - `Trove: Photo Collage` (21) - The shoebox with the twee sanded off, keepsake value and no doilies, but it leans toward treasure and hints at storing pictures, which this app does not do.
-**Kin** - `Kin: Photo Collage` (19) - Say it once and anyone can spell it forever, family with no soft edges or curly fonts, but three letters can read unfinished and the trademark ground is muddy.
-**Hearth** - `Hearth: Photo Collage` (22) - One syllable of gathered-around warmth that sits beautifully beside a reveal where faces glow, but Hearth Display is a real family-tech brand you would share search with.
-**Keepsake** - `Keepsake: Photo Collage` (24) - The plainest true statement here, since what you export is literally a keepsake, but it is the closest to saccharine and an ordinary word means crowded search.
-**Fireside** - `Fireside: Photo Collage` (24) - Gathering and storytelling in one word, pairing naturally with the burning glow of the reveal, but it is the closest thing here to cozy marketing language.
-**Memento** - `Memento: Photo Collage` (23) - A souvenir word saying the output is something you keep, easy to spell after one hearing, but the Nolan film owns the recall and it points at memory rather than togetherness.
+**Astonisher** - `Astonisher: Collage` (19/30) - [WINNABLE] - It states what the reveal is for with agreeable 1930s stage-bill swagger, types cleanly and searches clean, but a name promising astonishment has to deliver inside three seconds on every launch.
+**Enchantry** - `Enchantry: Photo Collage` (24/30) - [WINNABLE] - A coined noun for the practice of enchanting, search-clean and anchored by a known stem, but "enchant" implies changing what the user handed over, which brushes the hard rule about implying features you lack.
+**Secondsight** - `Secondsight: Collage` (20/30) - [WINNABLE] - The gift of seeing what others cannot is a fair description of what Vision does to the faces, and closing it up makes it findable, but people will keep typing two words and land near psychic hotlines.
+**Uncannery** - `Uncannery: Photo Collage` (24/30) - [WINNABLE] - A coined place-noun that hints at faces being recognised without saying so, zero results and anchored by the known stem "uncanny", with the ghost of cannery adding a faint industrial chill.
+**Wondersmith** - `Wondersmith: Collage` (20/30) - [WINNABLE] - It claims the maker rather than the miracle, which is honest for an app that invents nothing, two results and no spelling or voice risk whatsoever, though -smith has become a startup tic.
+**Cantrip** - `Cantrip: Photo Collage` (22/30) - [CONTESTED] - A Scots word for a minor spell, short, typed correctly on first hearing, and modest in the right way for a free app with one small unlock, but it has exact-match namesakes and reads gamer to a slice of the audience.
+**Wonderstruck** - `Wonderstruck: Collage` (21/30) - [CONTESTED] - It names the exact feeling the reveal is engineered to produce and needs no explanation, spelling-clean, but a novel, a film and a perfume hold the shelf and it describes your user rather than the app.
+**Wonderwork** - `Wonderwork: Photo Collage` (25/30) - [CONTESTED] - An old word for a small miracle that reads as craft rather than conjuring, with no spelling or voice risk at all, but Wonder is a crowded prefix and the whole thing lands a touch earnest.
 
-# Coined
+## Verb
 
-Invented or bent words, mostly craft-trade endings, chosen so the name is actually ownable.
+**Mosaify** - `Mosaify: Photo Collage` (22/30) - [WINNABLE] - The one construction that keeps his favourite word while making it a verb, rare enough to rank, but listeners will type Mosaicify first and you still inherit this store's meaning of mosaic, which is pixelating a face.
+**Panelize** - `Panelize: Photo Collage` (23/30) - [WINNABLE] - A genuine printing verb for laying panels out on a sheet, so "panelize it" is literal rather than clever and the category has not claimed it, but the -ize spelling costs you every British and Australian listener.
+**Snapjoin** - `Snapjoin: Photo Collage` (23/30) - [WINNABLE] - Blunt, functional and completely clean on search, spelling and Siri, so "snapjoin these" explains itself instantly, but it sounds like a networking SDK and gives you no personality to build on.
+**Snapquilt** - `Snapquilt: Collage` (18/30) - [WINNABLE] - "Snapquilt it" has a homemade charm that suits a solo developer telling his own story, and it is search-clean with no spelling or voice fork, but quilting pulls the brand toward crafts and away from the camera roll.
+**Snugfit** - `Snugfit: Photo Collage` (22/30) - [WINNABLE] - It promises the tight no-clipping result and is impossible to misspell or mishear, but "snug fit" is a stock phrase, so the name feels borrowed and verbs awkwardly in a real sentence.
+**Tilify** - `Tilify: Photo Collage` (21/30) - [WINNABLE] - Short, coined and verb-shaped so it works the first time somebody hears it, wide open in search, but it doubles down on both a suffix trend and the tile keyword, neither of which flatters the face work.
+**Dovetail** - `Dovetail: Photo Collage` (23/30) - [CONTESTED] - The verb already means exactly what the engine does, with no spelling fork and no Siri escape from the store, but a well-known research tool owns the word among software people even if not in the photo category.
+**Interlock** - `Interlock: Photo Collage` (24/30) - [CONTESTED] - Plain, confident, and the right verb with zero spelling ambiguity anywhere, but it is a common English word, which is the exact failure this round exists to prevent, and it gives an editor nothing human.
+**Nestfit** - `Nestfit: Photo Collage` (22/30) - [CONTESTED] - Two syllables for the two things the engine does, nest and fit, unambiguous to type, but it reads as a component library and inherits both the fitness shelf and the Nest voice pull.
+**Snapfit** - `Snapfit: Photo Collage` (22/30) - [CONTESTED] - "Snapfit these four" sounds like the layout clicking into place and is typed right after one hearing, but it has exact-match namesakes, lands in the fitness shelf, and carries the Snapchat pull too.
+**Snapsemble** - `Snapsemble: Collage` (19/30) - [CONTESTED] - Snap plus assemble tells the whole story in one word and "just snapsemble it" lands on first hearing, but the leading "snap" pulls toward Snapchat and the cleverness may wear thin by year two.
+**Tilefit** - `Tilefit: Photo Collage` (22/30) - [CONTESTED] - Short, physical and honest about the result with no misspelling risk at all, but the tile token drops it among match-three games and bathroom renovation.
 
-**Tessery** - `Tessery: Photo Collage` (23) - TESS-er-ee, the mosaic tile given the trade ending of joinery and bakery, so it reads as a workshop rather than a filter and nobody else can register it, though it blurs with Tessera if you ever say both aloud.
-**Tessela** - `Tessela: Photo Collage` (23) - teh-SELL-uh, the Latin diminutive of tessera, softer than Tessera and far easier to own, with only a UK data consultancy nearby and only for the domain.
-**Intarsio** - `Intarsio: Photo Collage` (24) - in-TAR-see-oh, Italian for inlay work, your whole no-generation argument in one borrowed word that sounds like a small Milanese studio, though most Americans need to hear it once to spell it.
-**Tilery** - `Tilery: Photo Collage` (22) - TILE-er-ee, the place where tiles are made, plain and instantly spellable with the same workshop tone as Joinery, but tile is a tired software word.
-**Terrazza** - `Terrazza: Photo Collage` (24) - teh-RAHT-sah, one vowel off the Terrazzo you liked, keeping the poured-chip texture with a softer ending, but Italian speakers will hear patio.
-**Facetry** - `Facetry: Photo Collage` (23) - FASS-uh-tree, a coined trade noun carrying face and facet at once, which is what the app does, though the face reading only lands once someone knows the feature.
-**Seamly** - `Seamly: Photo Collage` (22) - Your dividers are seams and this is the word for doing seams well, warm and very short, but half the people who hear it will type Seemly.
-**Musive** - `Musive: Photo Collage` (22) - MYOO-siv, from opus musivum, the mosaic bloodline without the poisoned keyword, landing near muse and musing, but at icon size a lot of people will read music.
-**Quiltery** - `Quiltery: Photo Collage` (24) - KWIL-ter-ee, the workshop where pieces of what you already have get sewn into one panel, genuinely the right metaphor, but the warmth skews craft-fair and grandmotherly.
-**Piecewise** - `Piecewise: Photo Collage` (25) - A real mathematical term for something defined in separate pieces, which is literally a split tree, precise and dry in a way Apple respects, but more clever than warm.
-**Arrangery** - `Arrangery: Collage` (18) - uh-RAYNJ-er-ee, the trade of arranging, the most literal statement of the thesis, but a syllable too long and it reads as a description wearing a name's clothes.
-**Cornerwise** - `Cornerwise: Collage` (19) - Built on your diagonal corner drag, meaning on the diagonal, with an Anglo-Saxon sturdiness no photo app occupies, but it names one gesture and gestures get redesigned out.
+## Typesetting and bookbinding
 
-# Magic and Wonder
+**Bonefolder** - `Bonefolder: Photo Collage` (25/30) - [WINNABLE] - The tool a binder runs along a fold to make it sit flat, which stands in nicely for dragging a divider until it looks right, and the only occupant of the name is bonefolder.com selling the physical tool; "folder" pulls toward files, which the icon has to fight.
+**Colophon** - `Colophon: Photo Collage` (23/30) - [WINNABLE] - The printer's note recording who made a book, where and when, which is exactly the date and location this app carries into the export, and nothing on the App Store owns it; Colophon Foundry owns the word in type circles, and outside publishing it earns its meaning slowly.
+**Frisket** - `Frisket: Photo Collage` (22/30) - [WINNABLE] - The printer's cut mask that keeps ink off what must stay clean, which is face-safe layout in one word, and the App Store returns only Frisk Radio and Friskus, so the shelf is genuinely empty; the single real cost is that one hearer in five types "friskit".
+**Kettlestitch** - `Kettlestitch: Photo Collage` (27/30) - [WINNABLE] - The knot that links each folded section to the next so loose sheets become one book, unclaimed anywhere and easy to spell because it is two ordinary words; twelve letters and a strong pull toward knitting and kitchens are the price.
+**Platen** - `Platen: Photo Collage` (21/30) - [WINNABLE] - The plate that brings the whole forme down in one even impression, so everything lands together the way the export does, and no App Store app uses it, though platen.app is already taken as a domain and older users will picture a typewriter.
+**Reglet** - `Reglet: Photo Collage` (21/30) - [WINNABLE] - The thin spacer that holds lines of type snug, so the word is quietly about the gaps between things, and searches turn up no app and no software product at all; it is soft and hookless, and architects share the term offline where it cannot hurt you.
+**Makeready** - `Makeready: Photo Collage` (24/30) - [CONTESTED] - Everything a printer does to get the press aligned before the first good copy, which is literally what the auto-layout does while you watch, and it verbs cleanly; Xerox holds a registered FreeFlow Makeready mark in prepress software, a different class but a noisy search neighbour.
+**Sheetwise** - `Sheetwise: Photo Collage` (24/30) - [CONTESTED] - A real imposition scheme meaning "decide what goes where on one sheet", and it types correctly on first hearing, which almost nothing else here does; the leading token "sheet" drags partial searches toward spreadsheets and bedding, which is the one thing the governing rule punishes.
 
-Names for the reveal, chosen to carry wonder without implying the app generates anything.
+## Architecture and masonry
 
-**Sleight** - `Sleight: Photo Collage` (23) - Skill practiced so far past effort that it reads as wonder, fair for an app doing hard scoring work and showing only the result, but a good share of listeners will type S-L-I-G-H-T.
-**Deft** - `Deft: Photo Collage` (20) - Sleight of hand with the mysticism drained out, four letters, unmistakable spoken once, and accurate about a tool whose trick is precision, though it names the craft and not the theater.
-**Glimmer** - `Glimmer: Photo Collage` (23) - It names the literal thing on screen, face lights coming up one at a time before the layout settles, a rare case of a poetic word being plainly descriptive, but soft names get lost in a loud category.
-**Instinct** - `Instinct: Photo Collage` (24) - It claims judgment rather than intelligence, the honest version of face-aware scoring with no AI-generation implication, but it is a common word that will never feel discovered.
-**Diviner** - `Diviner: Photo Collage` (23) - A diviner finds what is hidden with no instrument to show for it, which maps onto Vision locating faces you never pointed at, though some will picture dowsing rods.
-**Flourish** - `Flourish: Photo Collage` (24) - The display move a card handler makes to prove nothing is hidden, and plain English for the grace of the finished layout, but Canva owns a product by this name so search is crowded.
-**Prestige** - `Prestige: Photo Collage` (24) - In a magic act the prestige is the return of the thing that vanished, structurally exactly your picker-to-editor transition, but it drags in luxury connotations and the Nolan film.
-**Augury** - `Augury: Photo Collage` (22) - Reading signs to know what comes next, beautiful for an engine predicting where a face wants room, but occult-leaning and an industrial AI company already trades under it.
-**Knack** - `Knack: Photo Collage` (21) - The humblest word here, the wonder of someone simply good at a thing, and it flatters the user rather than the software, but there is no theater in it at all.
-**Hunch** - `Hunch: Photo Collage` (21) - Warm and unpretentious, the way a friend rearranges your photos without explaining why, but it implies guessing when what you built is measured.
-**Second Sight** - `Second Sight: Collage` (21) - The old phrase for knowing something you were never told, precisely the beat where a user realizes the app noticed the faces, but two words sit heavy under an icon.
-**Presto** - `Presto: Photo Collage` (22) - The word actually spoken at the reveal, cheerful and universally understood with no occult residue, but it is the closest thing here to a gimmick and PrestoPhoto sits on it.
+**Bondstone** - `Bondstone: Photo Collage` (24/30) - [WINNABLE] - The single stone laid through a wall to tie two separate leaves into one thing, which describes what a good collage does to four unrelated photos, and it types itself after one hearing; the marks that exist are a bourbon and a Portuguese property fund, both far from your class.
+**Perpend** - `Perpend: Photo Layouts` (22/30) - [WINNABLE] - The vertical joint between two bricks, the deliberate gap your border control actually sets, and the cleanest search result of the whole audit with no app, no product and no trademark anywhere; the oddity is an archaic verb meaning "to ponder" waiting for anyone who looks it up.
+**Scribeline** - `Scribeline: Photo Collage` (25/30) - [WINNABLE] - To scribe is to cut one piece to follow the shape of another, which is the honest description of dividers that move to fit the faces they found, and closing it up lifts it clear of the common verb; some people will type it as two words, and Apple's tokenising mostly but not always saves you.
+**Spandrel** - `Spandrel: Photo Collage` (23/30) - [WINNABLE] - The shape left over between an arch and its frame, which is a lovely thing to name an app after when the craft is what happens between pictures, and the App Store has only a developer called Spandrel Interactive, no app; it spells as heard and carries a faint lecture-hall chill the icon must warm.
+**Corbel** - `Corbel: Photo Layouts` (21/30) - [CONTESTED] - The bracket that steps out of a wall to carry a load, which suits a corner-bracket drag, and it is two syllables anyone can spell first time; Corbel is a Microsoft system font and an existing App Store developer name, so a slice of your results will always be typography chatter.
+**Stringcourse** - `Stringcourse: Collage` (21/30) - [CONTESTED] - The horizontal band of stone that organises a facade above and below, so the word already means a considered dividing line rather than a grid, and no app uses it; twelve letters is a lot of thumb, and the leading token "string" sits on a crowded developer-tools shelf.
+**Transom** - `Transom: Photo Collage` (22/30) - [CONTESTED] - The crossbar that splits an opening above from below, the most typeable word in the masonry drawer and a literal picture of what the app draws; Transom Note-Taker for Writers is live on the App Store and transom.org is an established public-radio outfit, so you would be sharing the token.
 
-# Already Screened
+## Textile and quilting
 
-The only names here that have been through a real availability and trademark pass. Everything above is unscreened, so if you fall for one of those it needs checking before you commit.
+**Everstitch** - `Everstitch: Photo Collage` (25/30) - [WINNABLE] - Leads on "ever" rather than any crowded photo token, pitches the keeping-rather-than-posting register directly, and the audit found nothing using it; it says nothing at all about layout, so the subtitle carries the whole category.
+**Patchery** - `Patchery: Photo Collage` (23/30) - [WINNABLE] - Patchwork with the craft-shop suffix, short, warm, impossible to mistype and unclaimed, and it keeps the promise of pieces joined rather than pixels invented; "patch" carries a software-fix smell to a technical audience, which is the only thing to weigh.
+**Sashery** - `Sashery: Photo Collage` (22/30) - [WINNABLE] - The softer, more brandable cousin of Sashwork with the same border-strip meaning and a friendlier ending that suits a solo developer, and it is completely unclaimed; being a coinage with no dictionary anchor, it invites "sashiery" and a faint ribbon association.
+**Sashwork** - `Sashwork: Photo Collage` (23/30) - [WINNABLE] - Sashing is the fabric strip between quilt blocks, so this is your border control named exactly, and no app, product or trademark uses the compound; quilters will get it instantly and nobody else will, so the screenshots have to do the teaching.
+**Weftwork** - `Weftwork: Photo Collage` (23/30) - [WINNABLE] - The weft is the thread that crosses the warp and actually builds the cloth, which is making-something-from-threads in eight unclaimed letters; anyone who has never woven may type "weptwork" or "westwork", so it is the riskiest spell in this group.
+**Quiltery** - `Quiltery: Photo Collage` (23/30) - [CONTESTED] - The warmest and most legible option in the whole audit, spelled right by everyone and misheard by nobody, and honest that the app arranges what you already have; Apple prefix-matches, so "quilt" lands you on a shelf with real quilting-pattern apps and you inherit their competition.
+**Slipstitch** - `Slipstitch: Photo Collage` (25/30) - [CONTESTED] - The invisible join that closes a binding without showing, a lovely claim for an app that makes separate photos read as one thing, and a usable verb; slipstitch.app is already a fashion marketplace in beta and knitting apps use the term, so it is occupied rather than empty.
+**Whipstitch** - `Whipstitch: Photo Collage` (25/30) - [CONTESTED] - The stitch that joins two edges by looping over both, so the metaphor lands exactly and it verbs beautifully in a review; whipstitch.app is a live B2B reporting platform, and "whip" reads tougher than a family-photo app wants.
 
-**Tessera** - `Tessera: Photo Collage` (22) - SCREENED. The single tile a mosaic is made from, so each photo is one, which keeps your whole world without landing in the blur-tool search results. My pick of the entire list.
-**Joinery** - `Joinery: Photo Collage` (22) - SCREENED CLEAN. Pieces fitted so tightly they need no fastener and no gap, true at two photos or twelve. Zero hits in Photo and Video. First read is furniture for about half a second.
-**Composure** - `Composure: Photo Collage` (24) - SCREENED, kill reversed. Its ordinary meaning is your measured result. The competing photo apps turned out to be delisted, though delisting is not abandonment.
-**Dovetail** - `Dovetail: Photo Collage` (23) - SCREENED, contested. In plain English it already means things fitting together perfectly, and the store is empty, but a funded research SaaS owns the domain and the search results.
-**Terrazzo** - `Terrazzo: Photo Collage` (23) - SCREENED. Chips set flush in a field with visible margin between them, which is exactly what your border produces. The .app domain is an active developer toolchain.
-**Smalti** - `Smalti: Photo Collage` (21) - SCREENED. The hand-cut glass tiles of fine mosaic work, the most premium-feeling and most ownable option, at the cost of nobody knowing the word.
-**Inlay** - `Inlay: Photo Collage` (20) - SCREENED. Short, precise, sharp at thumbnail size, no Photo and Video conflict. One keystroke from "overlay", which reads as a developer component.
-**Tessel** - `Tessel: Photo Collage & Grid` (28) - SCREENED. Sole survivor of the first adversarial pass. Six letters, safe small, but it is a stem rather than a word so people will write Tessell.
-**Mosaica** - `Mosaica: Photo Collage` (23) - Softer and more ownable than the bare word, and it reads as a proper noun rather than a common one, which matters for trademark. Still shares the poisoned search stem.
+## Recognition and resolution
+
+**Acutance** - `Acutance: Photo Collage` (23/30) - [WINNABLE] - The photographic term for how decisively an edge resolves, and the audit found no app, no company and no trademark using it, which is rare this late in a list; it lives next door to sharpening, so it can be misread as an editing tool by the very audience it flatters.
+**Anneal** - `Anneal: Photo Collage` (21/30) - [WINNABLE] - Heat and slow cooling letting a disordered material settle into order, which is also the algorithm family your layout engine lives in, and it is an unclaimed real verb; said quickly it can land as "an eel", which is worth testing aloud before committing.
+**Nucleate** - `Nucleate: Photo Collage` (23/30) - [CONTESTED] - Order crystallising out of a solution around one seed point, a real verb with a clean App Store prefix; nucleate.org is a large, well-funded biotech nonprofit that dominates the web result, and the word sounds like chemistry homework rather than family photos.
+**Pennydrop** - `Pennydrop: Photo Collage` (24/30) - [CONTESTED] - Names the instant the arrangement makes sense rather than the machinery, spells itself first time and works as a verb; "penny drop" is the standard Indian fintech bank-verification term with heavy commercial web presence, so anyone typing it as two words lands in payments.
+**Vitrify** - `Vitrify: Photo Collage` (22/30) - [CONTESTED] - Loose material fusing into glass, which nods at tesserae without touching the poisoned word "mosaic", and it is already a verb; Vitrify is established B2B IVF clinic software, far from your class but enough to muddy a web search, and it still sounds like something done to industrial waste.
+
+## Astronomy and navigation
+
+**Constellate** - `Constellate: Photo Collage` (26/30) - [WINNABLE] - A real, rarely used verb for gathering scattered things into a cluster, with no App Store app on it, and the rare gift of a name you can conjugate in your own UI copy; hearers reach for "Constellation", though Apple's prefix matching means that near-miss still finds you.
+**Nightglass** - `Nightglass: Photo Layout` (24/30) - [WINNABLE] - The naval telescope built for seeing in poor light, a closed-up compound the audit found nobody using, and it types correctly the first time with no plausible misspelling; it points at optics rather than arrangement, so it means only what your storytelling makes it mean.
+**Asterism** - `Asterism: Photo Layout` (22/30) - [CONTESTED] - A named star pattern too small to be a constellation and, in printing, a cluster of asterisks, so it carries the sky and the page without claiming either; "Asterism - wisdom of divination" already sits on the App Store and stargazing apps use the word as a feature, so you would be sharing.
+**Firmament** - `Firmament: Photo Layout` (23/30) - [CONTESTED] - The old word for the vault where stars are set in place, which gives you fixedness and permanence for an app that preserves the original date and location, and no App Store app holds it; Cyan's 2023 game Firmament owns the web result, and the word has a churchiness people admire more than they say aloud.
+**Orrery** - `Orrery: Photo Layout` (20/30) - [CONTESTED] - A clockwork model that arranges bodies that already exist and invents nothing, the most literal description of this app anywhere in the audit, with only a Playdate game and an Amazon listing on the name; the double R gets typed "orery" often, and Orderry is a live App Store app one letter away.
+
+## Carried forward, not audited this round
+
+**Ashlar** - `Ashlar: Photo Collage` (21/30) - [UNAUDITED] - Dressed stone laid so tight you cannot slide a blade into the joint, an unusual and ownable sound, but cold and architectural with no warmth for screenshots.
+**Baryta** - `Baryta: Photo Collage` (21/30) - [UNAUDITED] - The brilliant white coating on fibre-base paper, which is literally the border your app draws, but spelling it after one hearing is a coin flip.
+**Chamfer** - `Chamfer: Photo Collage` (22/30) - [UNAUDITED] - The small angle a maker cuts so two pieces meet without a ragged edge, crisp and modern for a minimal icon, but it names a detail rather than the object.
+**Deckle** - `Deckle: Photo Collage` (21/30) - [UNAUDITED] - The soft irregular edge on hand-made paper and old snapshot prints, quietly about the border users actually adjust, though it belongs more to papercraft than optics.
+**Joinery** - `Joinery: Photo Collage` (22/30) - [UNAUDITED] - Pieces fitted so tightly they need no fastener and no gap, true at two photos or twelve. Zero hits in Photo and Video. First read is furniture for about half a second.
+**Marquetry** - `Marquetry: Photo Collage` (24/30) - [UNAUDITED] - The craft where a picture is nothing but pieces cut and fitted flush, the truest one-word statement of what the app does, undone slightly by people typing marketry or marquetery.
+**Mozaika** - `Mozaika: Photo Collage` (22/30) - [UNAUDITED] - The Slavic spelling, the only form here that fully escapes the censorship search results, but heard aloud it is a three-way coin flip on spelling.
+**Musaica** - `Musaica: Photo Collage` (22/30) - [UNAUDITED] - Muse and mosaic fused, soft and faintly literary, with a changed vowel that genuinely escapes the blur-tool search results, though half the room will type Mos- before Mus-.
+**Musiva** - `Musiva: Photo Collage` (21/30) - [UNAUDITED] - Opus musivum is the Latin that mosaic descended from, so it hands you the whole world without the poisoned keyword, though it drifts toward music and muse.
+**Penumbra** - `Penumbra: Photo Collage` (23/30) - [UNAUDITED] - The soft outer edge of a shadow, cold and editorial and right on a dark icon, but pure mood that says nothing about arranging photographs.
+**Photogram** - `Photogram: Photo Collage` (24/30) - [UNAUDITED] - Made by arranging things on light-sensitive paper with no camera and nothing invented, the cleanest statement of what this app is, though it sits one letter from photograph and one syllable from Instagram.
+**Pietra** - `Pietra: Photo Collage` (21/30) - [UNAUDITED] - Short for pietra dura, hard-stone inlay cut so precisely you cannot find the seams, soft and easy to say, but stripped of dura it just means stone.
+**Sectile** - `Sectile: Photo Collage` (22/30) - [UNAUDITED] - Opus sectile built pictures from cut shapes fitted edge to edge instead of uniform cubes, which is your split tree in one Latin word, though it is cold and near-homophonous with "sextile".
+**Sinopia** - `Sinopia: Photo Collage` (22/30) - [UNAUDITED] - The red underdrawing on the setting bed, the plan the picture gets laid onto, which is exact for an engine that decides before it places and unknown to essentially everyone.
+**Smalti** - `Smalti: Photo Collage` (21/30) - [UNAUDITED] - The hand-cut glass tiles of fine mosaic work, the most premium-feeling and most ownable option, at the cost of nobody knowing the word.
+**Terrazzo** - `Terrazzo: Photo Collage` (23/30) - [UNAUDITED] - Chips set flush in a field with visible margin between them, which is exactly what your border produces. The .app domain is an active developer toolchain.
+**Tessel** - `Tessel: Photo Collage & Grid` (28/30) - [UNAUDITED] - Sole survivor of the first adversarial pass. Six letters, safe small, but it is a stem rather than a word so people will write Tessell.
+**Tessera** - `Tessera: Photo Collage` (22/30) - [UNAUDITED] - The single tile a mosaic is made from, so each photo is one, which keeps your whole world without landing in the blur-tool search results. My pick of the entire list.
+**Torcello** - `Torcello: Photo Collage` (23/30) - [UNAUDITED] - The lagoon church whose mosaics people go quiet in front of, with a good bounce in the mouth, obscure enough that most will read it as an invented Italian brand.
