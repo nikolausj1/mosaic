@@ -264,10 +264,16 @@ for (setIndex, files) in sets.enumerated() {
             label: config.name,
             template: decision.template,
             templateIndex: decision.templateIndex,
-            extra: String(format: " · cost %.3f", decision.cost)
+            extra: String(format: " · cost %.3f", decision.cost),
+            isShipsToday: config.name == "current"
         ))
     }
 
+    // 4 columns x 2 rows, not 2x4: a laptop screen is landscape, and 8
+    // panels arranged 4-wide gives a sheet whose overall aspect (~1.75:1)
+    // is close to a laptop display's own, so "fit to window" leaves each
+    // panel about as large as it can be. 2x4 would be a tall, narrow sheet
+    // that a landscape screen can only show by shrinking it far more.
     let outputURL = URL(fileURLWithPath: outputDirPath).appendingPathComponent("\(setName)_sweep.png")
     let panelResults = renderComparisonSheet(
         setLabel: setName,
@@ -275,7 +281,8 @@ for (setIndex, files) in sets.enumerated() {
         photosByID: photosByID,
         variants: variants,
         border: border,
-        outputURL: outputURL
+        outputURL: outputURL,
+        columns: 4
     )
     baselineClippedTotal += panelResults.first?.clippedFaceCount ?? 0
 
