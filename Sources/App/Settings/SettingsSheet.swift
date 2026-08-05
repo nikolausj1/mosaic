@@ -80,26 +80,19 @@ struct SettingsSheet: View {
                     MagicRevealPreference.current = newValue
                 }
 
-                // Dev Tools group (Justin, 2026-07-27, moved from the deleted
-                // `DevSheet.swift`) - a visually separate Section below the
-                // purchase rows above, same reasoning `DevSheet` had for
-                // keeping these apart from everything else.
-                //
-                // GATED OUT OF RELEASE 2026-07-30, per this file's own header
-                // note, which had asked for exactly this and never got it.
-                // "Clear collages" is a red destructive action that silently
-                // discards the user's current and last work with no undo, and
-                // "Replay first-run experience" exposes internal state nobody
-                // outside development has a reason to reach. Shipping either
-                // is worse than an App Review risk - it is a way for a real
-                // person to lose a collage they were in the middle of.
-                #if DEBUG
+                // Replay is user-facing and NOT destructive: it resets a
+                // couple of UserDefaults flags so the welcome and launch
+                // choreography play again. Plenty of shipping apps offer
+                // exactly this ("show the intro again"), and Justin needs it
+                // in Release to review the splash animation on his own phone
+                // without a rebuild each time. Kept OUT of the DEBUG gate
+                // below for that reason.
                 Section {
                     Button {
                         onReplayFirstRun()
                     } label: {
                         HStack {
-                            Text("Replay first-run experience")
+                            Text("Play intro again")
                                 .foregroundStyle(.white)
                             Spacer()
                             Image(systemName: "arrow.counterclockwise")
@@ -107,22 +100,25 @@ struct SettingsSheet: View {
                                 .foregroundStyle(.white.opacity(0.3))
                         }
                     }
+                } footer: {
+                    Text("Replays the opening animation and the welcome screen. Coach marks and the editor's first-cell hint replay the next time you open the editor.")
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+                .listRowBackground(Color.mosaicSurface)
 
+                // "Clear collages" STAYS gated. It is a red destructive
+                // action that discards the user's current and last work with
+                // no undo - the reason this gate was added in the first
+                // place. Splitting the two is what lets Replay ship without
+                // shipping this.
+                #if DEBUG
+                Section {
                     Button {
                         showClearConfirm = true
                     } label: {
                         Text("Clear collages (current + last)")
                             .foregroundStyle(.red.opacity(0.85))
                     }
-                } footer: {
-                    // Coach marks (`hasSeenCoachMarks`) and the editor's
-                    // auto-selected first cell (`hasSeenEditor`) live in
-                    // EditorView.swift - this replay resets their
-                    // UserDefaults keys but can't re-stage an Editor that
-                    // isn't on screen, so those two genuinely need the next
-                    // Editor entry.
-                    Text("Replay takes effect immediately for the welcome screen above. Coach marks and the editor's first-cell hint replay the next time you open the editor.")
-                        .foregroundStyle(.white.opacity(0.4))
                 }
                 .listRowBackground(Color.mosaicSurface)
                 #endif
