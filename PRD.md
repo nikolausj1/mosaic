@@ -63,7 +63,7 @@ Every one of the top ~12 collage apps on the App Store today is free-with-subscr
 | S4 | Export of a 4-photo collage completes in under 3 seconds and peaks under 400MB. |
 | S5 | Zero states in which a photo does not completely fill its cell. Not reachable by any gesture or sequence. |
 | S6 | Force-quit mid-edit; relaunch restores the document exactly - same crops, same fractions, same borders. |
-| S7 | An exported collage carries the earliest capture date of its sources and files itself next to them in Photos. |
+| S7 | An exported collage carries the earliest source date and location in its own EXIF, and saves at the TOP of the library so it can be shared immediately. (REVISED 2026-07-30 by Justin - see Metadata below.) |
 | S8 | Export resolution beats Layout's (750x750) by at least 4x on the long edge for any collage of modern iPhone photos. |
 
 **The one-sentence test**
@@ -292,7 +292,7 @@ Tapping **Save** renders, writes to Photos, then presents a modal sheet:
 
 **Rendering.** Full-resolution export goes through **Core Graphics (`CGContext`), never SwiftUI's `ImageRenderer`**, which is unreliable at large scales. Photos are composited **one at a time and released** to bound peak memory. If the render still fails, retry once at half scale and tell the user.
 
-**Metadata.** The saved asset carries the **earliest capture date among the sources**, and their location if they agree. The collage then files itself next to the photos it's made from; Photos' "Recents" sorts by date-added, so you still find it immediately today. Layout destroyed this metadata for nine years and broke people's photo-print subscriptions.
+**Metadata.** REVISED 2026-07-30 (Justin). The original design filed the collage under the earliest source date, on the reasoning that Photos' Recents sorts by date-added so it would still surface immediately. Real use disproved that: Justin reported having to hunt for a collage he had just made in order to share it from Photos or Messages, because the share surfaces sort by creation date. The asset's `creationDate` is now the export time, so it lands at the top and is immediately shareable. The earliest source date and the agreeing location are instead written into the JPEG's own EXIF (DateTimeOriginal, TIFF DateTime, GPS), which the app previously did not do at all - so the provenance is now stronger than before and travels with the file, rather than existing only as a Photos-library attribute. Layout destroyed this metadata for nine years and broke people's photo-print subscriptions.
 
 **The watermark seam (v1 architecture, v2 feature).** The export pipeline ends with a single compositing hook. v2 draws a small wordmark there - ~4% of the long edge, bottom-right, inside the outer margin if one exists, white with a subtle dark stroke. v1 passes through untouched. **No StoreKit in v1.**
 

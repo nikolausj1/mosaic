@@ -33,7 +33,7 @@ Notes: never repeat title/subtitle words here (wasted characters); no competitor
 
 ## Promotional text (170 char limit, editable without review)
 
-The spiritual successor to Layout: pick 2-4 photos, drag the seams until it looks right, and save a full-resolution collage filed under the day the photos were taken.
+The spiritual successor to Layout: pick 2-4 photos, drag the seams until it looks right, and save a full-resolution collage that lands right at the top of your library, carrying the original date and place inside the file.
 
 ## Description
 
@@ -44,7 +44,7 @@ Pick 2 to 4 photos. Mosaic arranges them instantly, framing faces and subjects a
 WHAT MAKES IT DIFFERENT
 
 - Auto-framing that actually works: on-device intelligence centers faces and subjects in every cell the moment your photos land, so the starting point already looks good.
-- Saved into your timeline, not onto it: the finished collage is filed in your photo library under the date the earliest photo was taken, with location preserved, so it lives with the memory it belongs to.
+- Ready to share the second it is saved: the collage lands at the top of your library, where Photos and Messages offer it first. The earliest source photo's date and location are written into the file's own EXIF, so the provenance travels with the image wherever you send it. Layout destroyed that metadata for nine years.
 - Full resolution, always: exports use your photos' real pixels. No downscaling, no compression tricks.
 - Nothing to learn: no templates to browse, no tutorial to skip. The layout is the interface.
 

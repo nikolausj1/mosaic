@@ -39,7 +39,12 @@ struct WelcomeInstructionRows: View {
     private let rows: [Row] = [
         Row(id: 0, systemImage: "photo.on.rectangle", text: "Choose 2-4 photos", isQuiet: false),
         Row(id: 1, systemImage: "rectangle.split.2x1", text: "Drag the seams and corner to shape your collage", isQuiet: false),
-        Row(id: 2, systemImage: "square.and.arrow.down", text: "Save full resolution, filed under the day the photos were taken", isQuiet: false),
+        // Was "filed under the day the photos were taken" - that described
+        // the OLD S7 behavior (PRD.md still says this; flagged for Justin to
+        // reconcile). SaveCoordinator now files the asset at EXPORT time so
+        // it sorts to the top of Photos/Messages, and keeps the source
+        // date/location only in the JPEG's own EXIF (see SaveCoordinator.swift).
+        Row(id: 2, systemImage: "square.and.arrow.down", text: "Save full resolution, right at the top of your library", isQuiet: false),
         Row(id: 3, systemImage: "sparkles", text: "On-device intelligence frames your photos and suggests colors. Nothing leaves your iPhone.", isQuiet: true)
     ]
 
