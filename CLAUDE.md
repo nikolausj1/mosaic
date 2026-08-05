@@ -61,6 +61,25 @@ taste question; small polish with an obvious right answer; the name change.
   display-name change, and the "Capture this collage" feedback tool. A full
   merge would drag both into the shipping binary.
 
+### After a commit graduates, REBUILD Next rather than merging
+
+Cherry-picking a commit from Next to `main` and then merging `main` back into
+Next produces a duplicate: Next has the original, `main` has the copy, and any
+file touched by both conflicts messily. This has already happened once.
+
+The fix is not to resolve that merge. It is to rebuild Next:
+
+```
+git branch -f next-backup phase3-handover     # safety net
+git checkout -B phase3-handover main
+git cherry-pick -x <bundle-id commit> <capture commit>
+```
+
+Next is only ever `main` plus its two never-ship commits, so re-deriving it is
+cheap and leaves the invariant provably intact. Check it afterwards:
+`git log --oneline main..phase3-handover` should show exactly those two, and
+`git log --oneline phase3-handover..main` should be empty.
+
 ### The rule that stops `main` rotting
 
 **A bug found while testing Next, in code both branches share, gets fixed on
