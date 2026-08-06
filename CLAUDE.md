@@ -56,10 +56,13 @@ taste question; small polish with an obvious right answer; the name change.
 
 - **`main` -> Next: merge freely**, and do it often. That is what keeps Next a
   superset and stops the testbed drifting behind.
-- **Next -> `main`: cherry-pick only, NEVER a straight merge.** Next carries at
-  least two commits that must never reach the App Store: the bundle-ID and
-  display-name change, and the "Capture this collage" feedback tool. A full
-  merge would drag both into the shipping binary.
+- **Next -> `main`: cherry-pick only, NEVER a straight merge.** Next carries
+  three standing commits that must never reach the App Store: the bundle-ID
+  and display-name change, the "Capture this collage" feedback tool, and the
+  `LayoutPolicy` override that keeps the canvas ratio decision live (main
+  ships square-only auto layout as of 2026-08-05; the eagerness question is
+  being settled by eye on Next during the hero retune). A full merge would
+  drag all of them into the shipping binary.
 
 ### After a commit graduates, REBUILD Next rather than merging
 
@@ -72,13 +75,15 @@ The fix is not to resolve that merge. It is to rebuild Next:
 ```
 git branch -f next-backup phase3-handover     # safety net
 git checkout -B phase3-handover main
-git cherry-pick -x <bundle-id commit> <capture commit>
+git cherry-pick -x <bundle-id commit> <capture commit> <layout-policy commit>
 ```
 
-Next is only ever `main` plus its two never-ship commits, so re-deriving it is
-cheap and leaves the invariant provably intact. Check it afterwards:
-`git log --oneline main..phase3-handover` should show exactly those two, and
-`git log --oneline phase3-handover..main` should be empty.
+Next is only ever `main` plus its standing never-ship commits, so re-deriving
+it is cheap and leaves the invariant provably intact. Check it afterwards:
+`git log --oneline main..phase3-handover` should show exactly those standing
+commits, and `git log --oneline phase3-handover..main` should be empty. (Last
+rebuilt this way 2026-08-05, when the animation-pacing experiment graduated
+to `main` and the `LayoutPolicy` override joined the standing set.)
 
 ### The rule that stops `main` rotting
 
