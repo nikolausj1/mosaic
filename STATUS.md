@@ -2,7 +2,7 @@
 title: "STATUS - Photo Collage"
 created: 2026-07-24
 modified: 2026-08-06
-version: 4.1
+version: 4.2
 author: Claude Fable 5 (claude-fable-5)
 tags:
 ---
@@ -15,26 +15,22 @@ Mosaic, an iOS collage app (the spiritual successor to Instagram's discontinued 
 
 ## Stage
 
-Active Development, in App Store preparation. Feature-complete for v1 including the freemium unlock; the App Store Connect record exists and most listing metadata is entered.
+Active Development - **v1.0 (1) submitted to App Review 2026-08-06** (Waiting for Review), the Remove Watermark IAP in the same submission. Subtitle and marketing headline: "Auto layout that finds faces."
 
 **Two builds now run side by side on Justin's phone.** `main` is the shippable 1.0 candidate. A second branch installs as "Mosaic Next" under its own bundle ID, carrying everything in `main` plus whatever is being judged by eye, so a taste call never has to be made against the build that ships. The full rule, including why the merge direction is one-way, is in `CLAUDE.md`.
 
 ## Health
 
-🟢 On-track for submission. Justin signed off main on device (2026-08-05 evening, two feedback rounds same day). Overnight 2026-08-06: full pre-submission audit passed with zero rejection risks (privacy manifest, encryption key, no debug strings, no personal photos in bundle), the listing was truth-audited and corrected (stale screenshot caption re-rendered), and a distribution-signed Mosaic.ipa v1.0(1) sits at build/export/ one authenticated click from TestFlight. What remains is almost entirely Justin's: the name decision, the upload click, a TestFlight tester, and the App Review contact phone.
+🟢 Submitted. Build 1.0 (1) uploaded, attached, and submitted for review together with the IAP on 2026-08-06. All five last-mile ASC gaps (privacy label published as Data Not Collected, privacy policy URL, age rating 4+, content rights, Photo & Video category) were filled from the listing doc's drafted answers the same morning. Waiting on Apple now.
 
 ## Waiting on Me
 
-Sorted by what unblocks the most. The name is decided (Mosaic; title stays "Mosaic: Photo Collage & Layout"), the build is uploaded, processed, and attached to version 1.0 in App Store Connect, the metadata is corrected and saved, and the IAP sits in the draft review submission. What remains:
+The submission is in. What remains while Apple reviews:
 
-- [ ] **Upload the five screenshots** - drag `_store/screenshots-v2/01-05.png` onto the version page's iPhone screenshot area (automation was blocked at the file-picker/API boundary, everything else is done) (~2 min)
-      - unblocks: "Add for Review" - it is the last missing piece on the version
-- [ ] **One TestFlight tester besides you** - the build is live in TestFlight now (~15 min)
-      - unblocks: submission, and the only honest restore-purchases test
-- [ ] **On TestFlight: buy, restore, and confirm the clean copy lands and the watermark is gone** (~10 min)
-- [ ] **Final read of the version page, then "Add for Review" and Submit** - the IAP is already staged in the same submission (~10 min)
+- [ ] **Decide: swap screenshot panel 1 now or after approval** - the re-rendered panel (new "Auto layout that finds faces." headline plus light-blue-o lockup) is committed at `_store/screenshots-v2/01.png`, but ASC still holds the old render and screenshots are locked while Waiting for Review. Swapping now means remove-from-review, replace, resubmit (~1 day queue cost); after approval, screenshot swaps need no review (~2 min either way)
+- [ ] **TestFlight restore test, still worth doing during review** - buy, restore, watermark gone, clean copy at the top of the library. If anything fails, pull the submission before Apple finds it (~10 min)
 - [ ] **Sign off the accent color** - mockups in `_review/phase7-accent-*.png` (~5 min)
-- [ ] **Optional: rebuild the app icon in Icon Composer** - polish, not a blocker; dark/tinted variants already ship (~20 min)
+- [ ] **Optional: rebuild the app icon in Icon Composer** - polish, not a blocker (~20 min)
 
 ### Done, no longer yours
 
@@ -42,9 +38,9 @@ The weight sweep is judged: all 35 sets, with reasons (`~/Desktop/mosaic-sweep/F
 
 ## Next Up
 
-1. Justin: name decision, then upload the ready ipa (see Waiting on Me) and attach the IAP to the version in App Store Connect.
-2. Build hero plus legibility floor on Next - approved direction from the sweep feedback; its dependency (the relative face-size gate) is committed. Includes Justin's open clipping trade (face-aware clips rose 2 to 6 / 2 to 4 after the detection fix found more faces to protect) and the how-eagerly-may-the-canvas-leave-square question, both judged by eye on Next.
-3. TestFlight pass: restore, purchase, watermark-gone, clean-copy check.
+1. Build hero plus legibility floor on Next - approved direction from the sweep feedback; its dependency (the relative face-size gate) is committed. Includes Justin's open clipping trade (face-aware clips rose 2 to 6 / 2 to 4 after the detection fix found more faces to protect) and the how-eagerly-may-the-canvas-leave-square question, both judged by eye on Next.
+2. TestFlight restore test during the review window (see Waiting on Me).
+3. Respond to the review outcome; if approved, decide manual vs automatic release.
 
 ## Recently done (2026-08-06, overnight)
 
