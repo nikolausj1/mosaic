@@ -2,7 +2,7 @@
 title: "STATUS - Photo Collage"
 created: 2026-07-24
 modified: 2026-08-05
-version: 3.8
+version: 3.9
 author: Claude Fable 5 (claude-fable-5)
 tags:
 ---
@@ -50,6 +50,7 @@ The weight sweep is judged: all 35 sets, with reasons (`~/Desktop/mosaic-sweep/F
 
 ## Recently done (2026-08-05)
 
+- **Second on-device round, same day.** Splash: a beat after the wordmark, the list lands as one block (stagger removed), third row trimmed, block width capped so it centers as a group. The face-reveal pacing fix (the detection fix's 8+ faces had compressed the per-face gap into a flicker) was judged on Next and graduated to main the same day: span cap 1.15 to 2.4, assemble morph 0.50 to 0.72. And square is the auto-layout default on main again - the ratio challenge lives on only in Next (a third standing never-ship commit, documented in CLAUDE.md) until the hero retune settles how eagerly the canvas may leave square. Next was rebuilt per the CLAUDE.md recipe; smoke test 299/299.
 - **All five of Justin's on-device feedback items, shipped and installed.** Wordmark-only splash (the lockup under the animated icon repeated the icon); welcome rows down to three with the on-device-intelligence line promoted; Done clears the picker selection while back-to-tweak still retains it; the ghost demo got a real focus scrim (black 0.62, cutout tracking the live canvas, caption moved under the canvas at 15pt bold); and a purchase from the save sheet now automatically resaves a clean copy so nobody is stranded with only the watermarked JPEG.
 - **The lighter blue o, everywhere.** Both brand assets carried their blue as saturated-ink-at-partial-alpha (a white-knockout artifact) that read dark over the near-black splash; the light blue from the brand art (84,184,252) is now baked in as opaque ink in both the Lockup and the new Wordmark asset.
 - **The group-photo detection fix is committed** - a face now survives thresholding if it is within 60% of the largest confidence-passing face in the same photo (minimum two candidates, so lone background bystanders stay rejected). This is the fix that took the eight-person group from 0 faces to 8 and earned it the hero slot without the hero rule existing yet. 297/297 smoke assertions.
