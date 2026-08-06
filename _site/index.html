@@ -1,62 +1,827 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mosaic</title>
-<style>
-  :root { color-scheme: dark; }
-  * { box-sizing: border-box; }
-  html, body {
-    margin: 0; padding: 0;
-    background: #0B0B0D;
-    color: #E9E9EC;
-    height: 100%;
-  }
-  body {
-    font: 17px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 100vh;
-    padding: 32px;
-  }
-  main { max-width: 420px; text-align: center; }
-  h1 {
-    font-size: 28px;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-    color: #FAFAFB;
-    margin: 0 0 8px;
-  }
-  p { color: #8B8B93; margin: 0 0 32px; }
-  .links {
-    display: flex;
-    gap: 14px;
-    justify-content: center;
-  }
-  a {
-    color: #FAFAFB;
-    text-decoration: none;
-    border: 1px solid rgba(255,255,255,0.14);
-    border-radius: 999px;
-    padding: 10px 22px;
-    font-size: 15px;
-  }
-  a:hover, a:focus {
-    border-color: rgba(76,141,255,0.6);
-    background: rgba(31,107,232,0.12);
-  }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#08090c">
+  <meta name="description" content="Mosaic is a focused iPhone collage editor. Pick 2 to 4 photos, drag the seams, and save at full resolution—privately, on device.">
+  <link rel="canonical" href="https://nikolausj1.github.io/mosaic-app-site/">
+  <link rel="icon" href="assets/mosaic-icon.webp">
+  <title>Mosaic - Auto layout that finds faces</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #08090c;
+      --bg-soft: #0d1017;
+      --panel: rgba(18, 22, 31, 0.76);
+      --panel-solid: #11151e;
+      --text: #f7f8fb;
+      --muted: #9ca4b3;
+      --faint: #697182;
+      --line: rgba(255, 255, 255, 0.09);
+      --blue: #4db5ff;
+      --blue-deep: #1469ff;
+      --max: 1180px;
+      --radius: 30px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+      background: var(--bg);
+    }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      overflow-x: hidden;
+      background:
+        radial-gradient(circle at 86% 10%, rgba(24, 103, 255, 0.12), transparent 26rem),
+        radial-gradient(circle at 8% 36%, rgba(71, 178, 255, 0.06), transparent 24rem),
+        var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    img { display: block; max-width: 100%; }
+    a { color: inherit; }
+
+    .skip-link {
+      position: fixed;
+      left: 16px;
+      top: 12px;
+      z-index: 100;
+      transform: translateY(-150%);
+      border-radius: 999px;
+      background: white;
+      color: black;
+      padding: 10px 16px;
+    }
+
+    .skip-link:focus { transform: translateY(0); }
+
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid transparent;
+      background: linear-gradient(to bottom, rgba(8, 9, 12, 0.9), rgba(8, 9, 12, 0.72));
+      backdrop-filter: blur(18px) saturate(140%);
+      -webkit-backdrop-filter: blur(18px) saturate(140%);
+    }
+
+    .nav {
+      width: min(calc(100% - 40px), var(--max));
+      height: 76px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 11px;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 20px;
+      font-weight: 650;
+      letter-spacing: 0.15em;
+    }
+
+    .brand img {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      box-shadow: 0 8px 26px rgba(22, 104, 255, 0.24);
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 28px;
+      font-size: 14px;
+      color: #b8bfcb;
+    }
+
+    .nav-links a {
+      text-decoration: none;
+      transition: color 160ms ease;
+    }
+
+    .nav-links a:hover,
+    .nav-links a:focus-visible { color: white; }
+
+    .nav-status {
+      border: 1px solid rgba(91, 182, 255, 0.25);
+      border-radius: 999px;
+      background: rgba(43, 133, 255, 0.09);
+      color: #bfe2ff;
+      padding: 9px 14px;
+      font-weight: 600;
+    }
+
+    main { overflow: clip; }
+
+    .hero {
+      width: min(calc(100% - 40px), var(--max));
+      min-height: calc(100svh - 76px);
+      margin: 0 auto;
+      padding: 76px 0 88px;
+      display: grid;
+      grid-template-columns: minmax(0, 0.9fr) minmax(390px, 1.1fr);
+      align-items: center;
+      gap: clamp(42px, 7vw, 100px);
+    }
+
+    .eyebrow {
+      margin: 0 0 22px;
+      color: #75c4ff;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.17em;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3,
+    p { text-wrap: pretty; }
+
+    h1 {
+      max-width: 680px;
+      margin: 0;
+      font-size: clamp(56px, 7.3vw, 100px);
+      font-weight: 680;
+      letter-spacing: -0.065em;
+      line-height: 0.94;
+    }
+
+    .hero-copy {
+      max-width: 590px;
+      margin: 28px 0 0;
+      color: #acb3c0;
+      font-size: clamp(18px, 1.8vw, 22px);
+      line-height: 1.55;
+    }
+
+    .hero-actions {
+      margin-top: 36px;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .store-badge {
+      min-width: 202px;
+      display: inline-grid;
+      grid-template-columns: 27px auto;
+      grid-template-rows: auto auto;
+      column-gap: 11px;
+      align-items: center;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 13px;
+      background: #f7f8fa;
+      color: #07080b;
+      padding: 10px 15px 11px;
+      box-shadow: 0 16px 42px rgba(0, 0, 0, 0.25);
+    }
+
+    .store-badge .apple {
+      grid-row: 1 / 3;
+      font-size: 31px;
+      line-height: 1;
+    }
+
+    .store-badge small {
+      align-self: end;
+      font-size: 10px;
+      font-weight: 650;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .store-badge strong {
+      align-self: start;
+      font-size: 18px;
+      letter-spacing: -0.02em;
+    }
+
+    .requirements {
+      color: var(--faint);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .hero-visual {
+      position: relative;
+      isolation: isolate;
+      animation: arrive 900ms 120ms both cubic-bezier(.2,.8,.2,1);
+    }
+
+    .hero-visual::before {
+      content: "";
+      position: absolute;
+      z-index: -1;
+      inset: 15% 3% 10%;
+      border-radius: 50%;
+      background: rgba(27, 105, 255, 0.3);
+      filter: blur(72px);
+    }
+
+    .hero-shot {
+      width: min(76%, 390px);
+      /* Cap against the viewport so the phone never grows the hero row
+         past one screen - without this, the headline column (vertically
+         centered against the taller phone) started below the fold on
+         ordinary laptop heights. */
+      max-height: 74svh;
+      height: auto;
+      object-fit: contain;
+      margin: 0 auto;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 32px;
+      box-shadow: 0 38px 100px rgba(0, 0, 0, 0.48);
+      transform: rotate(1.2deg);
+    }
+
+    .hero-note {
+      position: absolute;
+      right: -16px;
+      bottom: 11%;
+      width: 170px;
+      border: 1px solid rgba(255, 255, 255, 0.11);
+      border-radius: 18px;
+      background: rgba(15, 19, 27, 0.82);
+      padding: 14px 15px;
+      color: #c7ced9;
+      font-size: 13px;
+      line-height: 1.35;
+      box-shadow: 0 20px 55px rgba(0, 0, 0, 0.35);
+      backdrop-filter: blur(18px);
+    }
+
+    .hero-note strong {
+      display: block;
+      margin-bottom: 3px;
+      color: white;
+      font-size: 14px;
+    }
+
+    .section {
+      width: min(calc(100% - 40px), var(--max));
+      margin: 0 auto;
+      padding: 120px 0;
+    }
+
+    .manifesto {
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .manifesto p {
+      max-width: 1020px;
+      margin: 0;
+      font-size: clamp(34px, 4.8vw, 70px);
+      font-weight: 560;
+      letter-spacing: -0.045em;
+      line-height: 1.08;
+    }
+
+    .manifesto .dim { color: #596171; }
+
+    .section-head {
+      max-width: 720px;
+      margin-bottom: 54px;
+    }
+
+    .section-head h2,
+    .privacy-copy h2 {
+      margin: 0;
+      font-size: clamp(42px, 5.4vw, 68px);
+      font-weight: 650;
+      letter-spacing: -0.055em;
+      line-height: 1;
+    }
+
+    .section-head p {
+      max-width: 610px;
+      margin: 21px 0 0;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.6;
+    }
+
+    .features {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 20px;
+    }
+
+    .feature-card {
+      position: relative;
+      overflow: hidden;
+      min-height: 680px;
+      grid-column: span 4;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background:
+        linear-gradient(165deg, rgba(31, 39, 55, 0.58), rgba(13, 16, 23, 0.96) 50%),
+        var(--panel-solid);
+      box-shadow: inset 0 1px rgba(255, 255, 255, 0.025);
+    }
+
+    .feature-text {
+      position: relative;
+      z-index: 2;
+      padding: 31px 31px 0;
+    }
+
+    .feature-number {
+      margin-bottom: 20px;
+      color: #66bdff;
+      font-size: 12px;
+      font-weight: 750;
+      letter-spacing: 0.15em;
+    }
+
+    .feature-card h3 {
+      max-width: 300px;
+      margin: 0;
+      font-size: 30px;
+      font-weight: 620;
+      letter-spacing: -0.04em;
+      line-height: 1.05;
+    }
+
+    .feature-card p {
+      max-width: 310px;
+      margin: 14px 0 0;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .feature-card img {
+      position: absolute;
+      width: 100%;
+      left: 0;
+      bottom: -2px;
+      mask-image: linear-gradient(to bottom, transparent 0%, black 18%, black 100%);
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 18%, black 100%);
+      transition: transform 400ms cubic-bezier(.2,.8,.2,1);
+    }
+
+    .feature-card:hover img { transform: translateY(-8px) scale(1.015); }
+
+    .export-card {
+      min-height: 550px;
+      margin-top: 20px;
+      display: grid;
+      grid-template-columns: 0.82fr 1.18fr;
+      align-items: center;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background:
+        radial-gradient(circle at 22% 50%, rgba(28, 120, 255, 0.12), transparent 45%),
+        #0d1118;
+    }
+
+    .export-copy { padding: clamp(34px, 6vw, 72px); }
+
+    .export-copy h3 {
+      margin: 0;
+      font-size: clamp(40px, 5vw, 66px);
+      font-weight: 650;
+      letter-spacing: -0.055em;
+      line-height: 0.98;
+    }
+
+    .export-copy p {
+      max-width: 430px;
+      margin: 22px 0 0;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.6;
+    }
+
+    .export-art {
+      position: relative;
+      align-self: stretch;
+      min-height: 550px;
+      overflow: hidden;
+    }
+
+    .export-art img {
+      position: absolute;
+      right: 5%;
+      bottom: -210px;
+      width: min(80%, 430px);
+      filter: drop-shadow(0 35px 65px rgba(0, 0, 0, 0.42));
+    }
+
+    .restraint {
+      padding-top: 64px;
+    }
+
+    .restraint-inner {
+      min-height: 530px;
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 70px;
+      align-items: center;
+      border-radius: var(--radius);
+      background: #f0f4fa;
+      color: #0a0c11;
+      padding: clamp(38px, 7vw, 92px);
+    }
+
+    .restraint h2 {
+      max-width: 540px;
+      margin: 0;
+      font-size: clamp(45px, 6.5vw, 82px);
+      font-weight: 660;
+      letter-spacing: -0.062em;
+      line-height: 0.96;
+    }
+
+    .no-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      border-top: 1px solid rgba(10, 12, 17, 0.16);
+    }
+
+    .no-list li {
+      display: flex;
+      justify-content: space-between;
+      gap: 28px;
+      border-bottom: 1px solid rgba(10, 12, 17, 0.16);
+      padding: 17px 0;
+      font-size: clamp(18px, 2vw, 24px);
+      font-weight: 570;
+      letter-spacing: -0.02em;
+    }
+
+    .no-list span:last-child {
+      color: #667082;
+      font-size: 0.62em;
+      font-weight: 700;
+      letter-spacing: 0.11em;
+      text-transform: uppercase;
+    }
+
+    .privacy {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: clamp(50px, 9vw, 130px);
+      align-items: center;
+    }
+
+    .privacy-copy p {
+      max-width: 560px;
+      margin: 24px 0 0;
+      color: var(--muted);
+      font-size: 19px;
+      line-height: 1.65;
+    }
+
+    .text-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 28px;
+      color: #7bc7ff;
+      font-weight: 650;
+      text-decoration: none;
+    }
+
+    .text-link span { transition: transform 160ms ease; }
+    .text-link:hover span { transform: translateX(4px); }
+
+    .privacy-card {
+      position: relative;
+      min-height: 390px;
+      overflow: hidden;
+      border: 1px solid rgba(82, 175, 255, 0.2);
+      border-radius: var(--radius);
+      background:
+        radial-gradient(circle at 80% 20%, rgba(56, 177, 255, 0.16), transparent 38%),
+        linear-gradient(150deg, #121a29, #0d1118 58%);
+      padding: clamp(32px, 5vw, 58px);
+    }
+
+    .privacy-card::after {
+      content: "";
+      position: absolute;
+      width: 230px;
+      height: 230px;
+      right: -70px;
+      bottom: -85px;
+      border: 1px solid rgba(91, 187, 255, 0.2);
+      border-radius: 50%;
+      box-shadow:
+        0 0 0 32px rgba(66, 170, 255, 0.03),
+        0 0 0 64px rgba(66, 170, 255, 0.025);
+    }
+
+    .privacy-card strong {
+      display: block;
+      max-width: 410px;
+      font-size: clamp(32px, 4vw, 52px);
+      font-weight: 620;
+      letter-spacing: -0.05em;
+      line-height: 1.04;
+    }
+
+    .privacy-points {
+      margin: 34px 0 0;
+      padding: 0;
+      list-style: none;
+      color: #b6bfcd;
+    }
+
+    .privacy-points li {
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      gap: 11px;
+    }
+
+    .privacy-points li::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      flex: none;
+      border-radius: 50%;
+      background: var(--blue);
+      box-shadow: 0 0 15px rgba(77, 181, 255, 0.7);
+    }
+
+    .site-footer {
+      width: min(calc(100% - 40px), var(--max));
+      margin: 0 auto;
+      border-top: 1px solid var(--line);
+      padding: 32px 0 44px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 30px;
+      color: #727a89;
+      font-size: 13px;
+    }
+
+    .footer-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 22px;
+    }
+
+    .footer-links a { text-decoration: none; }
+    .footer-links a:hover { color: white; }
+
+    @keyframes arrive {
+      from { opacity: 0; transform: translateY(25px) scale(0.985); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    @media (max-width: 980px) {
+      .hero {
+        grid-template-columns: 1fr;
+        padding-top: 70px;
+      }
+
+      .hero-copy-block { text-align: center; }
+      .hero-copy, .hero-copy-block h1 { margin-left: auto; margin-right: auto; }
+      .hero-actions { justify-content: center; }
+      .hero-visual { width: min(100%, 650px); margin: 0 auto; }
+      .hero-shot { margin: 0 auto; transform: none; }
+      .hero-note { right: -4px; }
+
+      .features { gap: 16px; }
+      .feature-card { grid-column: span 6; }
+      .feature-card:last-child { grid-column: 4 / span 6; }
+
+      .export-card { grid-template-columns: 1fr; }
+      .export-copy { padding-bottom: 0; }
+      .export-art { min-height: 580px; }
+      .export-art img { right: 10%; bottom: -260px; }
+
+      .restraint-inner,
+      .privacy { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 680px) {
+      .nav { width: min(calc(100% - 28px), var(--max)); height: 68px; }
+      .brand { font-size: 17px; }
+      .brand img { width: 34px; height: 34px; }
+      .nav-links { gap: 15px; }
+      .nav-links a:first-child { display: none; }
+      .nav-status { display: none; }
+
+      .hero,
+      .section,
+      .site-footer { width: min(calc(100% - 28px), var(--max)); }
+
+      .hero { min-height: auto; padding: 62px 0 76px; gap: 54px; }
+      h1 { font-size: clamp(52px, 16vw, 76px); }
+      .hero-copy { font-size: 17px; }
+      .hero-note { display: none; }
+      .section { padding: 88px 0; }
+      .section-head { margin-bottom: 34px; }
+
+      .features { display: block; }
+      .feature-card {
+        min-height: 650px;
+        margin-bottom: 14px;
+      }
+
+      .feature-text { padding: 27px 25px 0; }
+      .export-card { min-height: 0; }
+      .export-copy { padding: 38px 26px 0; }
+      .export-art { min-height: 510px; }
+      .export-art img {
+        right: 50%;
+        bottom: -165px;
+        width: min(94%, 390px);
+        transform: translateX(50%);
+      }
+
+      .restraint { padding-top: 34px; }
+      .restraint-inner { min-height: 0; gap: 50px; padding: 52px 27px; }
+      .no-list li { font-size: 18px; }
+      .privacy-card { min-height: 360px; }
+
+      .site-footer {
+        align-items: flex-start;
+        flex-direction: column-reverse;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
 </head>
 <body>
-<main>
-  <h1>Mosaic</h1>
-  <p>Photo Collage &amp; Layout for iPhone</p>
-  <div class="links">
-    <a href="privacy.html">Privacy Policy</a>
-    <a href="support.html">Support</a>
-  </div>
-</main>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <nav class="nav" aria-label="Primary navigation">
+      <a class="brand" href="#top" aria-label="Mosaic home">
+        <img src="assets/mosaic-icon.webp" alt="" width="38" height="38">
+        <img src="assets/mosaic-wordmark.webp" alt="Mosaic" style="width:auto;height:20px;border-radius:0;box-shadow:none;">
+      </a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="privacy.html">Privacy</a>
+        <a href="support.html">Support</a>
+        <span class="nav-status">Coming soon</span>
+      </div>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top">
+      <div class="hero-copy-block">
+        <p class="eyebrow">Photo collage, pared back</p>
+        <h1>Auto layout that finds faces.</h1>
+        <p class="hero-copy">
+          Your photos, side by side. Pick 2 to 4, drag the seams until it feels
+          right, then save at full resolution.
+        </p>
+        <div class="hero-actions">
+          <span class="store-badge" aria-label="Coming soon on the App Store">
+            <span class="apple" aria-hidden="true">&#63743;</span>
+            <small>Coming soon on the</small>
+            <strong>App Store</strong>
+          </span>
+          <span class="requirements">Made for iPhone<br>Requires iOS 18 or later</span>
+        </div>
+      </div>
+
+      <div class="hero-visual">
+        <img class="hero-shot" src="assets/screenshot-01.webp" alt="Mosaic photo picker showing selected photos" width="660" height="1434">
+        <div class="hero-note" aria-hidden="true">
+          <strong>2–4 photos</strong>
+          One frame. No template maze.
+        </div>
+      </div>
+    </section>
+
+    <section class="section manifesto" aria-label="Mosaic in one sentence">
+      <p>
+        A collage app where the layout is the interface.
+        <span class="dim">No stickers. No clutter. Nothing to learn.</span>
+      </p>
+    </section>
+
+    <section class="section" id="features">
+      <div class="section-head">
+        <p class="eyebrow">Simple by design</p>
+        <h2>Starts smart.<br>Stays in your hands.</h2>
+        <p>
+          Mosaic gets you to a good starting point, then makes every adjustment
+          direct, visible, and yours.
+        </p>
+      </div>
+
+      <div class="features">
+        <article class="feature-card">
+          <div class="feature-text">
+            <div class="feature-number">01 / AUTO-FRAME</div>
+            <h3>It sees people, not rectangles.</h3>
+            <p>Faces and subjects are framed automatically on your iPhone, before you touch a thing.</p>
+          </div>
+          <img src="assets/screenshot-02.webp" alt="Mosaic selecting and automatically framing four photos" width="660" height="1434" loading="lazy">
+        </article>
+
+        <article class="feature-card">
+          <div class="feature-text">
+            <div class="feature-number">02 / RESHAPE</div>
+            <h3>Drag the thing you want to change.</h3>
+            <p>Pull a seam. Move a corner. Pinch to reframe. The canvas responds directly to you.</p>
+          </div>
+          <img src="assets/screenshot-03.webp" alt="Mosaic editor with draggable seams and corner controls" width="660" height="1434" loading="lazy">
+        </article>
+
+        <article class="feature-card">
+          <div class="feature-text">
+            <div class="feature-number">03 / FINISH</div>
+            <h3>The frame belongs to the photo.</h3>
+            <p>Adjust thickness and rounding, then pull border colors straight from your own pictures.</p>
+          </div>
+          <img src="assets/screenshot-04.webp" alt="Mosaic border controls and colors sampled from photos" width="660" height="1434" loading="lazy">
+        </article>
+      </div>
+
+      <article class="export-card">
+        <div class="export-copy">
+          <p class="eyebrow">No quality tax</p>
+          <h3>Full resolution.<br>Always.</h3>
+          <p>
+            Your collage lands at the top of your library, ready to share.
+            The original date and location stay with the file as photo metadata.
+          </p>
+        </div>
+        <div class="export-art">
+          <img src="assets/screenshot-05.webp" alt="A finished Mosaic collage saved to Photos at full resolution" width="660" height="1434" loading="lazy">
+        </div>
+      </article>
+    </section>
+
+    <section class="section restraint" aria-labelledby="restraint-title">
+      <div class="restraint-inner">
+        <h2 id="restraint-title">Less app.<br>More photo.</h2>
+        <ul class="no-list">
+          <li><span>No account</span><span>Ever</span></li>
+          <li><span>No tracking</span><span>Zero</span></li>
+          <li><span>No ads</span><span>None</span></li>
+          <li><span>No subscription</span><span>Pay once</span></li>
+          <li><span>No template maze</span><span>Just drag</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section privacy" aria-labelledby="privacy-title">
+      <div class="privacy-copy">
+        <p class="eyebrow">Private by architecture</p>
+        <h2 id="privacy-title">Your photos stay yours.</h2>
+        <p>
+          Mosaic has no accounts, analytics, ads, or servers of its own.
+          Photo analysis happens entirely on your iPhone. We cannot see your
+          pictures because the app never sends them to us.
+        </p>
+        <a class="text-link" href="privacy.html">Read the privacy policy <span aria-hidden="true">→</span></a>
+      </div>
+      <div class="privacy-card">
+        <strong>Nothing personal collected.</strong>
+        <ul class="privacy-points">
+          <li>On-device photo processing</li>
+          <li>No third-party analytics SDKs</li>
+          <li>No advertising or cross-app tracking</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div>© 2026 Justin Nikolaus.</div>
+    <div class="footer-links">
+      <a href="mailto:dev@justinnikolaus.com">dev@justinnikolaus.com</a>
+      <a href="privacy.html">Privacy</a>
+      <a href="support.html">Support</a>
+    </div>
+  </footer>
 </body>
 </html>
