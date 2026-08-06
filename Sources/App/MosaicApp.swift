@@ -105,8 +105,22 @@ struct ContentView: View {
                     // "Save (Done on the save sheet): current.json ->
                     // last.json; current.json deleted"), then dismiss back
                     // to the Picker.
+                    //
+                    // Clear the picker's selection here too (Justin,
+                    // 2026-08-05): Done means "that collage is finished,"
+                    // so the Picker should come back empty rather than
+                    // showing the just-saved photos still checked. This is
+                    // deliberately NOT done in `onNew` above (the "Photos"
+                    // back button) - backing out to tweak the selection is
+                    // documented to retain it (see PickerView's
+                    // return-to-task scroll comment). `clearSelection()`
+                    // only touches `selectedAssetIDs`/thumb caches, not
+                    // `loadedLibraryVersion`, so it does not force
+                    // `PickerState.onAppear` to re-scan the library.
                     onDone: {
                         DocumentStore.archiveCurrentAsLast()
+                        pickerState.clearSelection()
+                        pickerState.clearFallbackPicks()
                         self.editorState = nil
                     },
                     // B32 Phase 0: the editor's first-entry ghost demo must
