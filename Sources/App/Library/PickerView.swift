@@ -970,16 +970,22 @@ struct PickerView: View {
                 launchPhase = .arrived
             }
         } else {
-            // First run: the teaching rows stagger in beneath the now-
-            // assembled mark, then (once they've all landed) the CTA fades
-            // in at the BOTTOM of the screen. `.welcomeReady` HOLDS from
-            // there - no further timer, see `getStarted()`.
+            // First run: hold a beat on the assembled mark + wordmark alone
+            // (Justin, 2026-08-05: "wait a beat between the wordmark showing
+            // and the list below"), then the teaching rows land as ONE block
+            // (same review: "display the list below all at the same time" -
+            // the per-row stagger is gone, see WelcomeInstructionRows), then
+            // the CTA fades in at the BOTTOM of the screen. `.welcomeReady`
+            // HOLDS from there - no further timer, see `getStarted()`.
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            guard launchPhase == .initial else { return }
             withAnimation(.easeOut(duration: 0.6)) {
                 launchPhase = .welcomeText
             }
-            // ~0.6s stagger x 4 rows + each row's own fade duration - timed
-            // to clear the last (AI) row before the CTA shows up.
-            try? await Task.sleep(nanoseconds: 2_400_000_000)
+            // The rows' single 0.5s fade plus a settle margin - timed to
+            // clear the block before the CTA shows up (was 2.4s when four
+            // rows staggered in one at a time).
+            try? await Task.sleep(nanoseconds: 1_100_000_000)
             guard launchPhase == .welcomeText else { return }
             withAnimation(.easeOut(duration: 0.6)) {
                 launchPhase = .welcomeReady

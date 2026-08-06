@@ -42,7 +42,10 @@ struct WelcomeInstructionRows: View {
     private let rows: [Row] = [
         Row(id: 0, systemImage: "photo.on.rectangle", text: "Choose 2-4 photos", isQuiet: false),
         Row(id: 1, systemImage: "rectangle.split.2x1", text: "Drag the seams and corner to shape your collage", isQuiet: false),
-        Row(id: 2, systemImage: "sparkles", text: "On-device intelligence frames your photos and suggests colors. Nothing leaves your iPhone.", isQuiet: false)
+        // Shortened (Justin, 2026-08-05, on-device review: "too much text
+        // for the third list item") - "suggests colors" was the trim; the
+        // privacy half is the part that has to survive.
+        Row(id: 2, systemImage: "sparkles", text: "On-device intelligence frames your photos. Nothing leaves your iPhone.", isQuiet: false)
     ]
 
     /// Drives the staggered reveal - false while the welcome stage is still
@@ -68,14 +71,22 @@ struct WelcomeInstructionRows: View {
                 }
                 .opacity(isRevealed ? 1 : 0)
                 .offset(y: isRevealed ? 0 : 8)
-                // ~0.6s stagger per row (Justin, 2026-07-26 grand-entrance
-                // rework, was one single 0.35s block fade) - each row's delay
-                // is keyed off its own index, so they land one after another
-                // rather than together.
-                .animation(.easeOut(duration: 0.5).delay(Double(row.id) * 0.6), value: isRevealed)
+                // One block again (Justin, 2026-08-05, on-device review:
+                // "display the list below all at the same time" - reversing
+                // the 2026-07-26 per-row stagger). The beat he asked for
+                // between the wordmark and this list lives in
+                // `PickerView.runLaunchChoreographyIfNeeded`, not here.
+                .animation(.easeOut(duration: 0.5), value: isRevealed)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // Capped and centerable rather than edge-to-edge (Justin, 2026-08-05:
+        // the left-aligned list read odd against a center-aligned screen, but
+        // centering the text itself would be odd too). The rows stay
+        // left-aligned WITHIN the block - the icon rail needs a straight
+        // left edge to read as a list - while the capped width lets the
+        // parent VStack center the whole block under the wordmark, so the
+        // group reads as centered without any row being center-set.
+        .frame(maxWidth: 300, alignment: .leading)
     }
 }
 
