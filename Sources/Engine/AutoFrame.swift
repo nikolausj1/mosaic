@@ -66,25 +66,64 @@ func halfVisible(zoom: Double, photoPixelSize: CGSize, cellSize: CGSize) -> (hx:
     return (hx, hy)
 }
 
+/// A face within this fraction of the LARGEST confidence-passing face in the
+/// same photo survives even if it misses the absolute `minPixelHeight` floor
+/// below - the size gate that lets an eight-person group photo score zero
+/// faces (every face individually under 8% of the short edge, but tightly
+/// clustered in size around each other) without also letting a lone small
+/// face far from any cluster back in (see `thresholdedFaces`' own comment).
+/// 0.6 was chosen against the real failing photo: its 8 faces range from
+/// 4.6%-6.7% of the short edge, a largest-to-smallest ratio of ~0.69 - 0.6
+/// clears that with margin while still rejecting a stray face at, say, half
+/// the size of the photo's actual subject(s).
+let relativeFaceSizeRatio = 0.6
+
 /// Step 1: faces surviving both thresholds - height (in PIXEL terms, against
 /// the photo's SHORT edge) and confidence. Factored out of `AutoFrameInput`
 /// (not private) so `MagicLayout.swift`'s `mustKeepRegion` can reuse the
-/// EXACT same thresholds (confidence 0.5, 8% of the short edge) rather than
-/// inventing its own - see B32 Phase 1 in `Magic Layout Spec.md`.
+/// EXACT same thresholds (confidence 0.5, 8% of the short edge, or the
+/// `relativeFaceSizeRatio` alternative below) rather than inventing its own -
+/// see B32 Phase 1 in `Magic Layout Spec.md`.
+///
+/// The height gate is now TWO alternatives, either of which is enough:
+///   - absolute: >= 8% of the photo's short edge (the original gate - what
+///     rejects a lone background bystander in an otherwise close-up photo,
+///     e.g. the 3up/set17 case), or
+///   - relative: >= `relativeFaceSizeRatio` of the LARGEST confidence-passing
+///     face in the SAME photo (what rescues a uniformly-small group, e.g. an
+///     eight-person photo where every face is individually under the
+///     absolute floor but they are all roughly the same size as each other) -
+///     but ONLY when at least 2 confidence-passing faces exist. A single
+///     small face trivially sits at 100% of "the largest face" (itself), so
+///     without that >= 2 guard the relative gate would rescue every lone
+///     small face in the corpus - reintroducing the exact background-
+///     bystander failure mode this function must not regress, just for
+///     photos with one candidate instead of several. A relative rule only
+///     means something once there is a second face to be relative TO.
+/// Whichever gate is easier to clear wins for a given face - the absolute
+/// gate alone already governs any photo with a normal-sized dominant subject
+/// (its 8% floor is far more permissive there than 60% of a big face would
+/// be), so this is additive: it only ever widens a photo where NO face clears
+/// the absolute floor on its own.
 func thresholdedFaces(faces: [CGRect], faceConfidences: [Double], photoPixelSize: CGSize) -> [CGRect] {
     let photoH = Double(photoPixelSize.height)
     let shortEdge = min(Double(photoPixelSize.width), Double(photoPixelSize.height))
     let minPixelHeight = 0.08 * shortEdge
 
-    var kept: [CGRect] = []
+    var candidates: [(rect: CGRect, pixelHeight: Double)] = []
     for (i, face) in faces.enumerated() {
         let confidence = i < faceConfidences.count ? faceConfidences[i] : 0
         guard confidence >= 0.5 else { continue }
-        let facePixelHeight = Double(face.height) * photoH
-        guard facePixelHeight >= minPixelHeight else { continue }
-        kept.append(face)
+        candidates.append((face, Double(face.height) * photoH))
     }
-    return kept
+    guard !candidates.isEmpty else { return [] }
+    let maxPixelHeight = candidates.map(\.pixelHeight).max() ?? 0
+    let relativeGateApplies = candidates.count >= 2
+    let relativeMinPixelHeight = relativeFaceSizeRatio * maxPixelHeight
+
+    return candidates
+        .filter { $0.pixelHeight >= minPixelHeight || (relativeGateApplies && $0.pixelHeight >= relativeMinPixelHeight) }
+        .map(\.rect)
 }
 
 /// Union of a (possibly empty) array of normalized rects; `.zero` for an
