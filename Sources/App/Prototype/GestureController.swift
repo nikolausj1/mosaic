@@ -959,10 +959,17 @@ final class GestureController {
         }
         state.document = reclampAll(state.document, canvasSize: fitted)
         state.commitGesture()
-        // Dragging a bracket is as deliberate a ratio choice as tapping a
-        // tray chip, so it stops the auto-choice the same way - see
-        // `commitCanvasRatioChoice`.
-        state.commitCanvasRatioChoice()
+        // Deliberately NOT `commitCanvasRatioChoice()` here (reversed
+        // 2026-08-06). The original reasoning - "dragging a bracket is as
+        // deliberate as tapping a tray chip" - turned out wrong in practice:
+        // the corner drag is the app's signature gesture, the one the ghost
+        // demo TEACHES, so every user commits a "preference" within their
+        // first minute, and from then on every new collage is born at
+        // whatever shape their last drag happened to end at - which is how
+        // Justin's main build kept producing non-square collages after
+        // square became the auto-layout default. A drag shapes THIS
+        // collage; only a tray chip tap (`setCanvasRatio`) states a lasting
+        // preference for future ones.
     }
 
     // MARK: - Swap

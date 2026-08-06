@@ -67,6 +67,12 @@ struct ContentView: View {
         .task {
             guard !didHandleLaunchArgs else { return }
             didHandleLaunchArgs = true
+            // Before any document is built: clear the ratio "preference"
+            // that old builds' corner-bracket drags stored by accident -
+            // see this function's own comment for the story. Must run
+            // ahead of `applyLaunchArgsIfNeeded` so even a restored-
+            // current.json launch's NEXT pick sees clean state.
+            EditorState.clearBracketRatioResidueOnce()
             await applyLaunchArgsIfNeeded()
         }
         // Independent of launch-arg handling above: entitlement should start

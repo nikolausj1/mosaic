@@ -427,14 +427,35 @@ final class EditorState {
         return Ratio(width: w, height: h)
     }
 
-    /// Called from the two places a ratio can be set BY HAND - a tray chip
-    /// tap (`setCanvasRatio`) and the end of a corner-bracket drag
-    /// (`endBracket`). Deliberately NOT called when the app chooses a ratio
-    /// itself at pick time, which would turn one auto-choice into a
-    /// permanent preference and stop the feature ever running again.
+    /// Called from the ONE place a ratio is set as stated intent - a tray
+    /// chip tap (`setCanvasRatio`). The end of a corner-bracket drag used to
+    /// call this too, and stopped (2026-08-06): the corner drag is the
+    /// app's signature gesture - the ghost demo teaches it - so treating
+    /// every drag as a standing preference meant every user "chose" a ratio
+    /// within their first minute and the auto decision never ran again (see
+    /// `endBracket`'s comment). Deliberately NOT called when the app
+    /// chooses a ratio itself at pick time either, which would turn one
+    /// auto-choice into a permanent preference the same way.
     func commitCanvasRatioChoice() {
         UserDefaults.standard.set(document.canvasRatio.width, forKey: Self.lastCanvasRatioWidthDefaultsKey)
         UserDefaults.standard.set(document.canvasRatio.height, forKey: Self.lastCanvasRatioHeightDefaultsKey)
+    }
+
+    /// One-time cleanup for the bracket-drag commit above (2026-08-06,
+    /// runs once per install thanks to the flag): any device that ran a
+    /// build where `endBracket` committed the ratio is carrying drag
+    /// residue as if it were stated intent, and every new collage is being
+    /// born at that accidental shape. There is no way to tell residue from
+    /// a genuine chip tap after the fact, so clear the stored ratio once
+    /// and let a real chip tap restate the preference - the cost is one
+    /// re-tap for someone who truly chose, the win is every drag-residue
+    /// device returning to the square default.
+    static func clearBracketRatioResidueOnce() {
+        let flag = "clearedBracketRatioResidue-2026-08-06"
+        guard !UserDefaults.standard.bool(forKey: flag) else { return }
+        UserDefaults.standard.removeObject(forKey: lastCanvasRatioWidthDefaultsKey)
+        UserDefaults.standard.removeObject(forKey: lastCanvasRatioHeightDefaultsKey)
+        UserDefaults.standard.set(true, forKey: flag)
     }
 
     /// B11 canvas eyedropper (Justin, 2026-07-26): true while the Border
