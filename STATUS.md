@@ -2,7 +2,7 @@
 title: "STATUS - Photo Collage"
 created: 2026-07-24
 modified: 2026-08-06
-version: 4.0
+version: 4.1
 author: Claude Fable 5 (claude-fable-5)
 tags:
 ---
@@ -25,19 +25,16 @@ Active Development, in App Store preparation. Feature-complete for v1 including 
 
 ## Waiting on Me
 
-Sorted by what unblocks the most. Everything here needs your hands; the machine side is done.
+Sorted by what unblocks the most. The name is decided (Mosaic; title stays "Mosaic: Photo Collage & Layout"), the build is uploaded, processed, and attached to version 1.0 in App Store Connect, the metadata is corrected and saved, and the IAP sits in the draft review submission. What remains:
 
-- [ ] **Decide the name** - see `Naming Study.md` and `Naming Decision.md`. Still the only item that gets materially more expensive after submission (~a decision)
-      - unblocks: the upload (ship under Mosaic or rename first - decide before the build goes up)
-- [ ] **Upload the build** - a distribution-signed ipa is ready. Easiest: Xcode Organizer per `build/UPLOAD-NEXT-STEPS.txt` Option A; or grab your API key's Issuer ID from App Store Connect and run the two commands in Option B (~5 min)
-      - unblocks: TestFlight, and everything after it
-- [ ] **One TestFlight tester besides you** (~15 min)
-      - unblocks: submission, and the only honest restore-purchases test (local StoreKit cannot model an Apple-ID purchase history; the code is verified correct, the environment is what needs TestFlight)
-- [ ] **Enter the App Review contact phone in App Store Connect** - deliberately never written to any file (~2 min)
-- [ ] **Recapture the IAP review screenshot from an Xcode run** so the button shows the real $2.99 price (~10 min)
+- [ ] **Upload the five screenshots** - drag `_store/screenshots-v2/01-05.png` onto the version page's iPhone screenshot area (automation was blocked at the file-picker/API boundary, everything else is done) (~2 min)
+      - unblocks: "Add for Review" - it is the last missing piece on the version
+- [ ] **One TestFlight tester besides you** - the build is live in TestFlight now (~15 min)
+      - unblocks: submission, and the only honest restore-purchases test
 - [ ] **On TestFlight: buy, restore, and confirm the clean copy lands and the watermark is gone** (~10 min)
-- [ ] **Sign off the accent color** - mockups in `_review/phase7-accent-*.png`; the brand blues are locked in code, so this is a confirmation rather than an open choice (~5 min)
-- [ ] **Optional: rebuild the app icon in Icon Composer** - GUI-only, so it needs your hands. Dark and tinted variants already ship, so this is polish, not a blocker (~20 min). Recommend skipping for v1, and skipping entirely if the name changes
+- [ ] **Final read of the version page, then "Add for Review" and Submit** - the IAP is already staged in the same submission (~10 min)
+- [ ] **Sign off the accent color** - mockups in `_review/phase7-accent-*.png` (~5 min)
+- [ ] **Optional: rebuild the app icon in Icon Composer** - polish, not a blocker; dark/tinted variants already ship (~20 min)
 
 ### Done, no longer yours
 
