@@ -1,9 +1,9 @@
 ---
 title: "STATUS - Photo Collage"
 created: 2026-07-24
-modified: 2026-07-29
-version: 3.7
-author: Claude Opus 5 (claude-opus-5)
+modified: 2026-08-05
+version: 3.8
+author: Claude Fable 5 (claude-fable-5)
 tags:
 ---
 
@@ -21,37 +21,39 @@ Active Development, in App Store preparation. Feature-complete for v1 including 
 
 ## Health
 
-🟡 At-risk, but for a better reason than yesterday. The layout intelligence has now been judged against 61 real photos rather than 4 curated ones, and it holds up: clipped faces drop from 22 to 2 across fifteen 4-photo sets, and 29 to 2 across twenty 3-photo sets. Two features that were written but never actually ran (auto-zoom, and the group-photo term) now run. What keeps this amber is that **a full build has still never been driven by hand on a phone**, and one open question is a naming decision that gets much more expensive after submission.
+🟡 At-risk, but closing in. The weight sweep has been judged by eye across all 35 sets, the direction is decided (hero plus legibility floor), the purchase flow is verified working end to end in local StoreKit, and the last round of on-device polish feedback (splash, ghost demo, post-purchase resave, picker reset) shipped and is installed on the phone as of 2026-08-05. What keeps this amber: the naming decision still gets much more expensive after submission, restore can only be truly verified in TestFlight/sandbox, and the hero rule itself is not built yet.
 
 ## Waiting on Me
 
-Sorted by what unblocks the most. Items 1-3 are the ones that matter this week.
+Sorted by what unblocks the most. Items 1-2 are the ones that matter this week.
 
-- [ ] **Drive the new build on your phone, top to bottom** - everything from the 29th is installed: the launch reveal, the Clear button, the full theater with faces lighting one at a time, the real-collage paywall, and auto-zoom finally working. Guided checklist: https://claude.ai/code/artifact/305b73b7-df5c-4e5b-8c15-4ed499e89625 (~45 min)
-      - unblocks: B26, and any honest read on whether the theater still delights on the fourth collage
-- [ ] **Decide the name** - see `Naming Study.md`. This is time-sensitive in a way the rest is not: renaming before first submission is cheap, after is expensive. The study found that "mosaic" already means *pixelate a face* in this category, which is the opposite of what the app does (~20 min to read, then a decision)
+- [ ] **Drive the build installed 2026-08-05 on your phone** - it has all five of today's changes: wordmark-only splash (with the lighter blue o), three welcome rows, Done clears the picker selection, the darkened ghost-demo scrim with the caption under the canvas, and the automatic clean resave after purchase. Two judgment calls to eyeball: the splash-to-masthead crossfade (wordmark morphs into lockup - one line to change if it reads badly) and the scrim darkness at 0.62 (~20 min)
+      - unblocks: sign-off on all of today's feedback, and the archive
+- [ ] **Decide the name** - see `Naming Study.md` and `Naming Decision.md`. Still the only item that gets materially more expensive after submission (~a decision)
       - unblocks: the App Store listing, the icon, and every screenshot that carries the wordmark
-- [ ] **Judge the layout sheets** - `~/Desktop/mosaic-layout-sheets/` (4-photo) and `mosaic-layout-sheets-3up/` (3-photo). Tell me which layouts look WRONG to your eye. That is the one input I cannot generate, and it is what turns Phase 4 from mechanism into quality (~20 min)
-      - unblocks: B32 Phase 4, and the group-area weighting decision below
-- [ ] **Decide the group-area trade** - the photo with the most people should get the most area, and it does not. Three search approaches were tried and all made it worse; the cause is that `framingCost` caps the legibility term while clip-avoidance is uncapped. Fixing it means reweighting, which risks clipped faces. **Your call on how much clipping risk is worth better composition** (~10 min, over the sheets)
-      - unblocks: B32 Phase 4 completion
-- [ ] **Test a real purchase from an Xcode run** - StoreKit only attaches to the scheme in Xcode, not a plain install, so this cannot be verified any other way (~10 min)
-      - unblocks: B8 sign-off
 - [ ] **One TestFlight tester besides you** (~15 min)
-      - unblocks: submission
+      - unblocks: submission, and the only honest restore-purchases test (local StoreKit cannot model an Apple-ID purchase history; the code is verified correct, the environment is what needs TestFlight)
+- [ ] **After a purchase, confirm the clean copy landed and the watermark is gone** - the resave is automatic now; this is a visual check in Photos (~2 min, part of the device pass)
 - [ ] **Sign off the accent color** - mockups in `_review/phase7-accent-*.png`; the brand blues are locked in code, so this is a confirmation rather than an open choice (~5 min)
 - [ ] **Optional: rebuild the app icon in Icon Composer** - GUI-only, so it needs your hands. Dark and tinted variants already ship, so this is polish, not a blocker (~20 min). Recommend skipping for v1, and skipping entirely if the name changes
 
 ### Done, no longer yours
 
-The in-app purchase is fully configured in App Store Connect (Apple ID 6795797662, $2.99, 175 regions, copy, review notes, screenshot). The listing is complete. The 40 photos are in and have been run through LayoutLab twice. The pacing decision is made and shipped: everyone gets the full theater.
+The weight sweep is judged: all 35 sets, with reasons (`~/Desktop/mosaic-sweep/FEEDBACK.txt`). The direction is decided - hero plus legibility floor. A real purchase went through in local StoreKit from an Xcode run; the "restore didn't work" scare was the environment (nothing to restore after a delete in local testing), not the code. The Settings dev rows are gated behind #if DEBUG (verified against the Release binary). The in-app purchase is fully configured in App Store Connect. The listing is complete.
 
 ## Next Up
 
-1. The device pass on the build installed 2026-07-29 00:35. Everything since the 28th is in it and none of it has been touched by hand.
-2. The naming decision, because it is the only open item that gets materially more expensive after submission.
-3. Judge the layout sheets, then settle the group-area weighting trade. That closes Phase 4 and with it the last quality unknown.
-4. Then gate the Settings dev rows behind `#if DEBUG`, archive, and TestFlight.
+1. The device pass on the build installed 2026-08-05 (all five feedback changes, none touched by hand yet).
+2. Build hero plus legibility floor - approved direction from the sweep feedback; its dependency (the relative face-size gate that finds all 8 faces in a group shot) landed and is committed. Includes Justin's open clipping trade: face-aware clips rose 2 to 6 (4-photo) and 2 to 4 (3-photo) after the detection fix found more faces to protect.
+3. The naming decision, because it is the only open item that gets materially more expensive after submission.
+4. Archive + upload, attach the IAP to the version, TestFlight.
+
+## Recently done (2026-08-05)
+
+- **All five of Justin's on-device feedback items, shipped and installed.** Wordmark-only splash (the lockup under the animated icon repeated the icon); welcome rows down to three with the on-device-intelligence line promoted; Done clears the picker selection while back-to-tweak still retains it; the ghost demo got a real focus scrim (black 0.62, cutout tracking the live canvas, caption moved under the canvas at 15pt bold); and a purchase from the save sheet now automatically resaves a clean copy so nobody is stranded with only the watermarked JPEG.
+- **The lighter blue o, everywhere.** Both brand assets carried their blue as saturated-ink-at-partial-alpha (a white-knockout artifact) that read dark over the near-black splash; the light blue from the brand art (84,184,252) is now baked in as opaque ink in both the Lockup and the new Wordmark asset.
+- **The group-photo detection fix is committed** - a face now survives thresholding if it is within 60% of the largest confidence-passing face in the same photo (minimum two candidates, so lone background bystanders stay rejected). This is the fix that took the eight-person group from 0 faces to 8 and earned it the hero slot without the hero rule existing yet. 297/297 smoke assertions.
+- **Weight sweep judged, direction decided.** Justin scored all 35 sheets with reasons; the through-line is hero-for-the-group-photo plus a legibility floor, approved as the next Engine build.
 
 ## Recently done (2026-07-29)
 
@@ -119,11 +121,14 @@ Done
 - [x] Submission config: no personal photos or debug launch args in Release, automatic signing, one version source, PrivacyInfo.xcprivacy, Photography category
 - [x] Source pushed to GitHub
 
+Done since
+- [x] Settings dev rows: "Play intro again" ships (not destructive); "Clear collages" gated behind #if DEBUG (verified absent from the Release binary via strings)
+- [x] Purchase flow verified end to end in local StoreKit (Xcode run, real prompt, unlock persisted)
+
 Still to do
 - [ ] Everything in "Waiting on Me" above
-- [ ] **Gate the Settings dev rows behind #if DEBUG** - "Replay first-run experience" and "Clear collages" currently ship in Release at Justin's request; must be gated or removed before submission
 - [ ] Recapture the IAP review screenshot from an Xcode run so the button shows the real price
-- [ ] Archive + upload a build, then TestFlight
+- [ ] Archive + upload a build, then TestFlight (also the only faithful restore-purchases test)
 - [ ] Featuring nomination (~3 months lead time recommended; pitch drafted)
 
 Open risk: the "Mosaic" trademark question stays accepted-but-unresolved (13 leading matches, plus an existing App Store app in the category). The compound title helps discovery, not legal exposure.
