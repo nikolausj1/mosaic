@@ -2,7 +2,7 @@
 title: "App Store Listing - Mosaic"
 created: 2026-07-26
 modified: 2026-08-06
-version: 2.2
+version: 2.3
 author: Claude Fable 5 (claude-fable-5)
 tags:
 ---
@@ -44,7 +44,7 @@ Pick 2 to 4 photos. Mosaic arranges them instantly, framing faces and subjects a
 WHAT MAKES IT DIFFERENT
 
 - Auto-framing that actually works: on-device intelligence centers faces and subjects in every cell the moment your photos land, so the starting point already looks good.
-- Ready to share the second it is saved: the collage lands at the top of your library, where Photos and Messages offer it first. The earliest source photo's date and location are written into the file's own EXIF, so the provenance travels with the image wherever you send it. Layout destroyed that metadata for nine years.
+- Ready to share the second it is saved: the collage lands at the top of your library, where Photos and Messages offer it first. The earliest source photo's date and location are written into the file's own EXIF, so the provenance travels with the image wherever you send it. Most collage apps strip that metadata; Mosaic keeps it.
 - Full resolution, always: exports use your photos' real pixels. No downscaling, no compression tricks.
 - Nothing to learn: no templates to browse, no tutorial to skip. The layout is the interface.
 
@@ -150,7 +150,7 @@ The IAP must be submitted **with** the first version - a new app's in-app purcha
 
 ## Screenshots
 
-`_store/screenshots-v2/01-05.png`, five shots at 1320x2868 (6.9" display) - the spanning/panorama set built by `_store/build_banner.py`, which supersedes the older `_store/screenshots/` set (still on disk but not for upload). Upload in that order - the first two are what most people ever see. Apple scales these down for smaller devices, so no other size is required.
+`_store/screenshots-v2/01-05.png`, five shots at 1320x2868 (6.9" display) - the spanning/panorama set built by `_store/build_banner.py`, which supersedes the older `_store/screenshots/` set (still on disk but not for upload). **Upload order: 02, 03, 04, 05, 01** (changed 2026-08-06 after the review pre-mortem): guideline 2.3.3 wants real app UI first, and panel 1 is a brand card with none - as the closer it is fine. The panorama survives this order: panels 2-5 stay contiguous (every device-crossing seam intact), and panel 1's edges are the banner's clean outer edges, so no seam mismatch anywhere. Apple scales these down for smaller devices, so no other size is required.
 
 **Before uploading, panel 5 needs to be rebuilt:** its subhead currently reads "Saved under the date the photos were taken," which describes the OLD filing behavior. Saves now sort to the top of the library at export time, with the earliest source photo's date/location written into the file's own EXIF - the same claim the Description already makes correctly ("the collage lands at the top of your library... The earliest source photo's date and location are written into the file's own EXIF"). Fix in `_store/build_banner.py` line 323 (`sub="Saved under the date the photos were taken."`), e.g. `sub="Files at the top of your library, provenance kept in the EXIF."`, then re-run the script and re-export panel 5 - the raw device screenshot underneath (`sc-save.png`) is still accurate and does not need reshooting.
 
