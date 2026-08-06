@@ -11,41 +11,38 @@
 // 2026-07-26) allows this full-screen-then-picker shape in place of any
 // multi-screen intro.
 //
-// Grand-entrance rework (Justin, 2026-07-26): the three teaching rows now
-// stagger in one at a time rather than fading as a single block, and a
-// fourth, quieter line about the on-device AI framing joins them - see
-// `isRevealed` below.
+// Grand-entrance rework (Justin, 2026-07-26): the teaching rows now stagger
+// in one at a time rather than fading as a single block - see `isRevealed`
+// below.
+//
+// Row swap (Justin, 2026-08-05): the "save full resolution" row is gone; the
+// on-device-intelligence row takes its place as a full teaching row instead
+// of a quieter fourth line, so there are exactly three rows again.
 import SwiftUI
 
-/// The teaching rows: three unchanged lines from the original modal card,
-/// plus a fourth, quieter one about on-device intelligence (Justin,
-/// 2026-07-26). Rows no longer fade in as a single block - each stages in on
-/// its own delay once `isRevealed` flips true, so a single state change
-/// reads as a real staggered sequence rather than one crossfade.
+/// The teaching rows: three full-weight lines, each staging in on its own
+/// delay once `isRevealed` flips true, so a single state change reads as a
+/// real staggered sequence rather than one crossfade.
 struct WelcomeInstructionRows: View {
     private struct Row: Identifiable {
         let id: Int
         let systemImage: String
         let text: String
-        /// The fourth (on-device-AI) row is deliberately quieter - smaller
-        /// type, muted color, no accent tint on its icon - so it reads as a
-        /// footnote to the three teaching rows above it, not a fourth equal
-        /// instruction.
+        /// No row is quiet as of the 2026-08-05 row swap (was used for a
+        /// fourth, footnote-weight row - smaller type, muted color, no
+        /// accent tint on its icon - that no longer exists). Left in place,
+        /// unused at full weight, in case a future row needs to be
+        /// de-emphasized again rather than removed.
         let isQuiet: Bool
     }
 
-    /// Exactly the three lines from the PRD-revision brief, plus the new
-    /// quiet fourth line, in order.
+    /// Exactly three lines (Justin, 2026-08-05): the old "save full
+    /// resolution" row is gone, and the on-device-intelligence row - a
+    /// quieter fourth line until now - takes its place at full weight.
     private let rows: [Row] = [
         Row(id: 0, systemImage: "photo.on.rectangle", text: "Choose 2-4 photos", isQuiet: false),
         Row(id: 1, systemImage: "rectangle.split.2x1", text: "Drag the seams and corner to shape your collage", isQuiet: false),
-        // Was "filed under the day the photos were taken" - that described
-        // the OLD S7 behavior (PRD.md still says this; flagged for Justin to
-        // reconcile). SaveCoordinator now files the asset at EXPORT time so
-        // it sorts to the top of Photos/Messages, and keeps the source
-        // date/location only in the JPEG's own EXIF (see SaveCoordinator.swift).
-        Row(id: 2, systemImage: "square.and.arrow.down", text: "Save full resolution, right at the top of your library", isQuiet: false),
-        Row(id: 3, systemImage: "sparkles", text: "On-device intelligence frames your photos and suggests colors. Nothing leaves your iPhone.", isQuiet: true)
+        Row(id: 2, systemImage: "sparkles", text: "On-device intelligence frames your photos and suggests colors. Nothing leaves your iPhone.", isQuiet: false)
     ]
 
     /// Drives the staggered reveal - false while the welcome stage is still

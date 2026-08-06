@@ -10,9 +10,11 @@
 //   2. TILES   - the six blue squares fall in (offset, rotated, scaled) and
 //                seat into their outlines; each landing flares its outline,
 //                which then fades, leaving the solid tile behind.
-//   3. WORDMARK - the existing "Lockup" image (mark+wordmark together, at
-//                the SAME frame/matchedGeometryEffect the compact masthead
-//                lockup uses) fades up beneath the assembled mark.
+//   3. WORDMARK - the "Wordmark" image (text only - the icon mark is already
+//                assembled above it, so showing it again inside a second
+//                image would be redundant) fades up beneath the assembled
+//                mark, at the SAME frame/matchedGeometryEffect id the compact
+//                masthead lockup uses.
 //
 // THE HARD RULE (Justin): this must ride the real photo-library fetch that
 // already runs at launch (`PickerState.onAppear()`), never add fixed time on
@@ -398,9 +400,13 @@ enum LaunchTiming {
 /// Draws the mark (outlines + tiles) and, beneath it, the wordmark. Sized to
 /// sit exactly where `PickerView.welcomeStage` used to put the plain
 /// oversized lockup image - see that file's call site for the
-/// `matchedGeometryEffect` handoff into `masthead`'s compact lockup, which
-/// this preserves unchanged (same id/namespace, attached to the same
-/// wordmark image).
+/// `matchedGeometryEffect` handoff into `masthead`'s compact lockup. The
+/// id/namespace here are unchanged, but this view now fades up "Wordmark"
+/// (text only) where `masthead` still shows "Lockup" (mark+wordmark) - the
+/// handoff was built assuming both ends showed the same image, so as of this
+/// swap it hands off between two DIFFERENT images/aspect ratios. Flagged for
+/// Justin/whoever next touches `PickerView.swift`'s masthead - not fixed
+/// here.
 struct LaunchRevealView: View {
     var controller: LaunchRevealController
     var lockupNamespace: Namespace.ID
@@ -422,7 +428,16 @@ struct LaunchRevealView: View {
             .frame(width: gridSize, height: gridSize)
             .compositingGroup()
 
-            Image("Lockup")
+            // Wordmark only, not the mark+wordmark "Lockup" - the icon mark
+            // is already assembled in the ZStack above, so the lockup would
+            // just repeat it (Justin's feedback). Height-constrained
+            // (`.frame(height:)` + `.scaledToFit()`), same as this used to be
+            // for "Lockup": measured against the source art, the wordmark's
+            // own glyph-height-to-canvas-height ratio (0.66) is within ~2.5%
+            // of the wordmark-as-embedded-in-Lockup ratio (0.65), so holding
+            // `wordmarkHeight` unchanged reads at the same visual weight as
+            // before rather than needing a size correction.
+            Image("Wordmark")
                 .resizable()
                 .scaledToFit()
                 .frame(height: wordmarkHeight)
