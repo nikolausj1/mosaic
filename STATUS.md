@@ -1,8 +1,8 @@
 ---
 title: "STATUS - Photo Collage"
 created: 2026-07-24
-modified: 2026-08-05
-version: 3.9
+modified: 2026-08-06
+version: 4.0
 author: Claude Fable 5 (claude-fable-5)
 tags:
 ---
@@ -21,19 +21,21 @@ Active Development, in App Store preparation. Feature-complete for v1 including 
 
 ## Health
 
-🟡 At-risk, but closing in. The weight sweep has been judged by eye across all 35 sets, the direction is decided (hero plus legibility floor), the purchase flow is verified working end to end in local StoreKit, and the last round of on-device polish feedback (splash, ghost demo, post-purchase resave, picker reset) shipped and is installed on the phone as of 2026-08-05. What keeps this amber: the naming decision still gets much more expensive after submission, restore can only be truly verified in TestFlight/sandbox, and the hero rule itself is not built yet.
+🟢 On-track for submission. Justin signed off main on device (2026-08-05 evening, two feedback rounds same day). Overnight 2026-08-06: full pre-submission audit passed with zero rejection risks (privacy manifest, encryption key, no debug strings, no personal photos in bundle), the listing was truth-audited and corrected (stale screenshot caption re-rendered), and a distribution-signed Mosaic.ipa v1.0(1) sits at build/export/ one authenticated click from TestFlight. What remains is almost entirely Justin's: the name decision, the upload click, a TestFlight tester, and the App Review contact phone.
 
 ## Waiting on Me
 
-Sorted by what unblocks the most. Items 1-2 are the ones that matter this week.
+Sorted by what unblocks the most. Everything here needs your hands; the machine side is done.
 
-- [ ] **Drive the build installed 2026-08-05 on your phone** - it has all five of today's changes: wordmark-only splash (with the lighter blue o), three welcome rows, Done clears the picker selection, the darkened ghost-demo scrim with the caption under the canvas, and the automatic clean resave after purchase. Two judgment calls to eyeball: the splash-to-masthead crossfade (wordmark morphs into lockup - one line to change if it reads badly) and the scrim darkness at 0.62 (~20 min)
-      - unblocks: sign-off on all of today's feedback, and the archive
 - [ ] **Decide the name** - see `Naming Study.md` and `Naming Decision.md`. Still the only item that gets materially more expensive after submission (~a decision)
-      - unblocks: the App Store listing, the icon, and every screenshot that carries the wordmark
+      - unblocks: the upload (ship under Mosaic or rename first - decide before the build goes up)
+- [ ] **Upload the build** - a distribution-signed ipa is ready. Easiest: Xcode Organizer per `build/UPLOAD-NEXT-STEPS.txt` Option A; or grab your API key's Issuer ID from App Store Connect and run the two commands in Option B (~5 min)
+      - unblocks: TestFlight, and everything after it
 - [ ] **One TestFlight tester besides you** (~15 min)
       - unblocks: submission, and the only honest restore-purchases test (local StoreKit cannot model an Apple-ID purchase history; the code is verified correct, the environment is what needs TestFlight)
-- [ ] **After a purchase, confirm the clean copy landed and the watermark is gone** - the resave is automatic now; this is a visual check in Photos (~2 min, part of the device pass)
+- [ ] **Enter the App Review contact phone in App Store Connect** - deliberately never written to any file (~2 min)
+- [ ] **Recapture the IAP review screenshot from an Xcode run** so the button shows the real $2.99 price (~10 min)
+- [ ] **On TestFlight: buy, restore, and confirm the clean copy lands and the watermark is gone** (~10 min)
 - [ ] **Sign off the accent color** - mockups in `_review/phase7-accent-*.png`; the brand blues are locked in code, so this is a confirmation rather than an open choice (~5 min)
 - [ ] **Optional: rebuild the app icon in Icon Composer** - GUI-only, so it needs your hands. Dark and tinted variants already ship, so this is polish, not a blocker (~20 min). Recommend skipping for v1, and skipping entirely if the name changes
 
@@ -43,10 +45,14 @@ The weight sweep is judged: all 35 sets, with reasons (`~/Desktop/mosaic-sweep/F
 
 ## Next Up
 
-1. The device pass on the build installed 2026-08-05 (all five feedback changes, none touched by hand yet).
-2. Build hero plus legibility floor - approved direction from the sweep feedback; its dependency (the relative face-size gate that finds all 8 faces in a group shot) landed and is committed. Includes Justin's open clipping trade: face-aware clips rose 2 to 6 (4-photo) and 2 to 4 (3-photo) after the detection fix found more faces to protect.
-3. The naming decision, because it is the only open item that gets materially more expensive after submission.
-4. Archive + upload, attach the IAP to the version, TestFlight.
+1. Justin: name decision, then upload the ready ipa (see Waiting on Me) and attach the IAP to the version in App Store Connect.
+2. Build hero plus legibility floor on Next - approved direction from the sweep feedback; its dependency (the relative face-size gate) is committed. Includes Justin's open clipping trade (face-aware clips rose 2 to 6 / 2 to 4 after the detection fix found more faces to protect) and the how-eagerly-may-the-canvas-leave-square question, both judged by eye on Next.
+3. TestFlight pass: restore, purchase, watermark-gone, clean-copy check.
+
+## Recently done (2026-08-06, overnight)
+
+- **Ship-prep while Justin slept.** Pre-submission audit: all eight checks PASS, zero rejection risks (Info.plist, ITSAppUsesNonExemptEncryption false, PrivacyInfo.xcprivacy correct and bundled, zero debug strings in the Release binary, Next-only capture tool confirmed absent, dark/tinted icons compiled, no personal photos in the bundle). Listing truth-audited: reviewer note added explaining the auto-resave (two Photos writes for one Save is by design, not a bug), save-sheet label corrected, screenshots pointer moved to the v2 set, and panel 5's stale caption re-rendered in place by regenerating the deterministic background. Archive + export: distribution-signed Mosaic.ipa v1.0(1) at build/export/, codesign verified; upload stopped only at the missing API-key Issuer ID - exact remaining steps in build/UPLOAD-NEXT-STEPS.txt.
+- **Sticky-ratio bug found and fixed after Justin's "main picked non-square" report.** Corner-bracket drags were committing a permanent ratio preference (the ghost demo teaches that very gesture), bypassing the square default. Drags no longer commit - only tray-chip taps do - and a one-time migration clears the residue.
 
 ## Recently done (2026-08-05)
 
