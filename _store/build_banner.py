@@ -278,7 +278,11 @@ def main():
     lockup_y = 980
     canvas.alpha_composite(lockup_r, (lockup_x, lockup_y))
 
-    headline1 = "Your photos.\nSide by side."
+    # "Auto layout that finds faces" - Justin, 2026-08-06: THE headline from
+    # now on (also the App Store subtitle). Replaced "Your photos.\nSide by
+    # side." - the selling points are auto layout, face finding, fully
+    # adjustable, and the old line said none of them.
+    headline1 = "Auto layout\nthat finds faces."
     y = lockup_y + lockup_h + 90
     for line in headline1.split("\n"):
         lw = draw.textlength(line, font=f_promise)

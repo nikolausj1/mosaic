@@ -2,7 +2,7 @@
 title: "App Store Listing - Mosaic"
 created: 2026-07-26
 modified: 2026-08-06
-version: 2.1
+version: 2.2
 author: Claude Fable 5 (claude-fable-5)
 tags:
 ---
@@ -19,7 +19,7 @@ Carries the brand plus the two highest-intent search terms. Alternate if App Rev
 
 ## Subtitle (30 char limit)
 
-**Grid editor, faces auto-framed** (exactly 30)
+**Auto layout that finds faces.** (29) - chosen by Justin 2026-08-06; also THE marketing headline from now on (screenshot panel 1, and anywhere a tagline is needed). Selling points it carries: auto layout + face finding; "fully adjustable" lives in the description.
 
 Adds four new ranking words (grid, editor, faces, auto-framed) and states the differentiator. Alternates:
 - "Clean, quick, nothing to learn" (30)
