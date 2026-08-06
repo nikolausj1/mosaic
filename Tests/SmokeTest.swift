@@ -1397,6 +1397,14 @@ do {
     let result = chooseCanvasAndLayout(photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions, border: .none)
     check(result.canvasRatio == landscapeChallengerRatio, "Phase 5: all-landscape (differing sizes) picks the landscape challenger (5:4)")
     check(Set(leafList(result.template)) == Set(photos), "Phase 5: all-landscape - every photo still placed exactly once")
+
+    // `allowRatioChallenge: false` (the shipping app's LayoutPolicy since
+    // 2026-08-05): the SAME set whose challenger just won above must stay
+    // square when the auto challenge is switched off - proving the gate
+    // beats a genuinely winning challenger, not just a marginal one.
+    let gated = chooseCanvasAndLayout(photos: photos, photoSizes: photoSizes, mustKeepRegions: mustKeepRegions, border: .none, allowRatioChallenge: false)
+    check(gated.canvasRatio == .square, "Phase 5 gate: allowRatioChallenge false keeps square even where the challenger wins")
+    check(Set(leafList(gated.template)) == Set(photos), "Phase 5 gate: the square search still ran - every photo placed exactly once")
 }
 
 do {

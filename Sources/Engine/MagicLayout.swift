@@ -925,7 +925,16 @@ func chooseCanvasAndLayout(
     referenceShortEdge: Double = defaultReferenceShortEdge,
     // See `FramingWeights`'s own doc comment: defaults to today's values, so
     // every existing caller (App layer included) is unaffected.
-    weights: FramingWeights = .current
+    weights: FramingWeights = .current,
+    // Gates steps 3-4 (the AUTO ratio challenge) only - a hand-set
+    // `userRatio` is always honored regardless. False means the auto
+    // decision is square, full stop (Justin, 2026-08-05: "make square the
+    // default on main" - the shipping app passes its `LayoutPolicy` value
+    // here; Next keeps the challenge on so the eagerness question can be
+    // settled by eye during the hero retune). Defaults to true so the
+    // Engine, the smoke test, and the LayoutLab/WeightSweep harnesses keep
+    // exploring ratio exactly as before.
+    allowRatioChallenge: Bool = true
 ) -> MagicLayoutDecision {
     precondition((2...4).contains(photos.count), "chooseCanvasAndLayout supports 2...4 photos")
 
@@ -973,7 +982,12 @@ func chooseCanvasAndLayout(
     }
 
     // 3. Crude nomination - orientation only, at most one challenger.
-    guard let challengerRatio = nominateChallengerRatio(photos: photos, photoSizes: photoSizes) else {
+    // `allowRatioChallenge` short-circuits ahead of it: when the caller has
+    // switched the auto challenge off entirely, the square default wins
+    // without a second search, same shape (and same cost) as the no-
+    // challenger path below.
+    guard allowRatioChallenge,
+          let challengerRatio = nominateChallengerRatio(photos: photos, photoSizes: photoSizes) else {
         return MagicLayoutDecision(
             canvasRatio: .square,
             templateIndex: defaultDecision.templateIndex,

@@ -535,7 +535,10 @@ final class PickerState {
             border: border,
             // Stated intent wins over the content rule. Nil until the user
             // has set a ratio by hand at least once.
-            userRatio: EditorState.rememberedCanvasRatio
+            userRatio: EditorState.rememberedCanvasRatio,
+            // Square-only auto layout on main, ratio challenge live on Next -
+            // see LayoutPolicy's own comment for the branch story.
+            allowRatioChallenge: LayoutPolicy.allowCanvasRatioChallenge
         )
         let assigned = decision.template
         // Everything downstream - solving for cells, auto-framing into them,
