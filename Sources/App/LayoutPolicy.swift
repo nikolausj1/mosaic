@@ -11,5 +11,8 @@ enum LayoutPolicy {
     /// to the hero retune, judged by eye on Next). True on Next, where the
     /// ratio decision stays live as a testbed experiment. A hand-set ratio
     /// is honored regardless of this value.
-    static let allowCanvasRatioChallenge = false
+    // NEXT OVERRIDE (standing testbed commit, like the bundle-id and
+    // capture commits - never ships): the ratio decision stays live here so
+    // the hero retune can settle how eagerly the canvas may leave square.
+    static let allowCanvasRatioChallenge = true
 }
