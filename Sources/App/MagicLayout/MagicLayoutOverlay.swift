@@ -435,8 +435,14 @@ final class MagicLayoutController {
             decideFlareDuration: 0.10,
             decideFadeAnimDuration: 0.22,
             decideFadeSleepDuration: 0.16,
-            assembleDuration: 0.50,
-            assembleHold: 0.44,
+            // Slowed from 0.50/0.44 (Justin, 2026-08-05, on-device: "move
+            // the photos a bit slower to the landing place" - judged on
+            // Next, approved same day). The hold keeps its ratio to the
+            // morph so the settle crossfade still starts inside the morph's
+            // final, near-stationary frames rather than after a visible
+            // stop.
+            assembleDuration: 0.72,
+            assembleHold: 0.63,
             handoverGlowDuration: 0.30,
             handoverHoldDuration: 0.48,
             photoCrossfadeDuration: 0.24,
@@ -511,7 +517,17 @@ final class MagicLayoutController {
         /// Ceiling on the total stagger WALK (first face lighting to last),
         /// regardless of how many faces were detected - a busy group shot
         /// compresses the per-face gap rather than ballooning past this.
-        static let maxStaggerSpan = 1.15
+        ///
+        /// Raised from 1.15 (Justin, 2026-08-05, on-device: "too fast... we
+        /// had a better version that took the time to box each face" -
+        /// judged on Next, approved same day). 1.15 was tuned when a
+        /// typical set surfaced 2-4 faces; the relative-size detection gate
+        /// now finds 8+ in a group shot, and 1.15 / 8 compresses the
+        /// per-face gap to ~0.14s - the same code that read as "found...
+        /// found... found" at four faces reads as a flicker at eight. 2.4
+        /// keeps the full 0.22 gap through ~11 faces; the cap only bites on
+        /// genuinely huge counts.
+        static let maxStaggerSpan = 2.4
         /// Held AFTER the last face lights, before the decide flare - the
         /// beat the owner asked for explicitly: a moment to register "found
         /// N faces" as a settled fact, not just the last flicker of a loop.
