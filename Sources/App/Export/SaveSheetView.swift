@@ -9,6 +9,18 @@ struct SaveSheetView: View {
     let result: SaveResult
     var onDone: () -> Void
     var storeService: StoreService
+    /// Fires when the user buys the remove-watermark unlock from THIS sheet's
+    /// paywall while `result` is a watermarked save - i.e. there is a
+    /// watermarked asset already sitting in the library that the purchase
+    /// just made stale. The caller (EditorView) re-runs its own save
+    /// pipeline, which re-reads `storeService.isUnlocked` (now true) and
+    /// produces a clean copy alongside the watermarked one - same full
+    /// pipeline (full-res render, EXIF, filed at the top of the library), not
+    /// a special-cased second path. Defaulted to a no-op so this file stays
+    /// self-contained if a call site doesn't wire it up. Justin's direction
+    /// (2026-08-05): a purchase should never leave the user with only the
+    /// watermarked copy they'd have to notice and manually re-save.
+    var onCleanResaveNeeded: () async -> Void = {}
 
     @State private var showShareSheet = false
     @State private var showPaywall = false
@@ -79,6 +91,16 @@ struct SaveSheetView: View {
         }
         .sheet(isPresented: $showPaywall) {
             PaywallSheet(storeService: storeService)
+        }
+        // Edge-triggered on purpose: only a false->true transition while THIS
+        // sheet is on screen means "the user just bought the unlock for the
+        // watermarked asset shown here." `result.wasWatermarked` is what
+        // keeps this from firing for a save that was already clean (nothing
+        // stale to fix) - PaywallSheet itself (a child sheet of this one)
+        // handles its own dismiss on the same change, independently.
+        .onChange(of: storeService.isUnlocked) { _, unlocked in
+            guard unlocked, result.wasWatermarked else { return }
+            Task { await onCleanResaveNeeded() }
         }
     }
 

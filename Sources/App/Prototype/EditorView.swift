@@ -245,7 +245,18 @@ struct EditorView: View {
                 SaveSheetView(result: saveResult, onDone: {
                     showSaveSheet = false
                     onDone?()
-                }, storeService: storeService)
+                }, storeService: storeService, onCleanResaveNeeded: {
+                    // Justin, 2026-08-05: buying the unlock from this sheet's
+                    // paywall must not leave the user holding only the
+                    // watermarked copy they just saved. `performSave()`
+                    // re-reads `storeService.isUnlocked` (now true), so
+                    // calling it again runs the identical full pipeline
+                    // watermark-free and updates `saveResult` in place - the
+                    // sheet re-renders with the clean result. SaveSheetView
+                    // itself guards the trigger (edge-triggered unlock flip
+                    // plus `result.wasWatermarked`), so this cannot loop.
+                    await performSave()
+                })
             }
         }
         .alert("Couldn't Save", isPresented: $showSaveError, presenting: saveErrorMessage) { _ in

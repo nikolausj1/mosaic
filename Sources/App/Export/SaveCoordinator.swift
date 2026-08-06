@@ -38,6 +38,13 @@ struct SaveResult {
     let assetLocalIdentifier: String
     let jpegData: Data
     let creationDate: Date?
+    /// Whether THIS save went out with the watermark applied - i.e.
+    /// `decorator` was a `WatermarkDecorator`, not `NoOpDecorator`, when
+    /// `save()` rendered it. Lets a caller holding this result (SaveSheetView)
+    /// know whether an unlock purchased afterward left this asset stale, so
+    /// it can trigger a clean re-save automatically instead of the user
+    /// having to notice and re-tap Save themselves.
+    let wasWatermarked: Bool
 }
 
 enum SaveError: Error {
@@ -112,7 +119,8 @@ final class SaveCoordinator {
                 pixelSize: rendered.pixelSize,
                 assetLocalIdentifier: assetID,
                 jpegData: rendered.jpegData,
-                creationDate: creationDate
+                creationDate: creationDate,
+                wasWatermarked: decorator is WatermarkDecorator
             ))
         } catch {
             return .failure(.libraryWriteFailed(reason: error.localizedDescription, rendered: rendered))
