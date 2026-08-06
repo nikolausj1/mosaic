@@ -905,8 +905,11 @@ struct PickerView: View {
             // former header comment, now this one's): the gear that used to
             // just open purchase settings is now also the Dev Tools entry
             // point, so the callback plumbing that used to feed `DevSheet`
-            // feeds `SettingsSheet` instead. Ships in Release FOR NOW - the
-            // lead owns gating these behind `#if DEBUG` before submission.
+            // feeds `SettingsSheet` instead. The submission gating happened
+            // (2026-08-04, inside SettingsSheet itself): "Play intro again"
+            // ships deliberately - it is not destructive - while "Clear
+            // collages" sits behind #if DEBUG, verified absent from the
+            // Release binary via strings.
             SettingsSheet(
                 storeService: storeService,
                 onReplayFirstRun: replayFirstRunExperience,
