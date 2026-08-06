@@ -320,7 +320,11 @@ def main():
              text_panel=3),
         dict(src=SRC["save"],
              headline="Full resolution.\nAlways.",
-             sub="Saved under the date the photos were taken.",
+             # Was "Saved under the date the photos were taken." - that
+             # described the OLD S7 filing behavior. Saves now land at the
+             # top of the library (export-time creation date); the source
+             # photos' date/location lives in the file's own EXIF.
+             sub="Lands right at the top of your library.",
              cx=panel_left(4) + PANEL_W * 0.50, scale=0.98,
              text_panel=4),
     ]
