@@ -18,6 +18,13 @@ targets:
       - path: Sources
         excludes:
           - Resources/Prototype/**
+      # B8: the StoreKit test config has to be a MEMBER of the project or
+      # Xcode cannot resolve the scheme's reference to it - it shows red in
+      # Edit Scheme and local purchase testing silently falls through to the
+      # real sandbox. `buildPhase: none` keeps it out of every target, so it
+      # is visible to Xcode and never bundled into the shipping app.
+      - path: Mosaic.storekit
+        buildPhase: none
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.levelup.mosaic
@@ -57,6 +64,6 @@ schemes:
       # B8: StoreKit 2 testing config (Mosaic.storekit at repo root) so
       # Simulator runs have a real, purchasable "Remove Watermark" product
       # without an App Store Connect record.
-      storeKitConfiguration: Mosaic.storekit
+      storeKitConfiguration: ../Mosaic.storekit
     archive:
       config: Release
