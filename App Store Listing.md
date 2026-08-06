@@ -1,8 +1,8 @@
 ---
 title: "App Store Listing - Mosaic"
 created: 2026-07-26
-modified: 2026-07-28
-version: 2.0
+modified: 2026-08-06
+version: 2.1
 author: Claude Fable 5 (claude-fable-5)
 tags:
 ---
@@ -116,8 +116,15 @@ is a one-time non-consumable. The app is fully functional without it;
 the only difference is a small Mosaic wordmark in the corner of saved
 collages. The purchase surface is reachable from the "Remove" link on
 the save sheet after saving, or from the gear icon in the top-right of
-the photo picker -> "Remove Watermark". "Restore Purchase" is in the
-same two places.
+the photo picker -> "Save without the watermark". "Restore Purchase" is
+in the same two places.
+
+If you buy the unlock from the save sheet's "Remove" link while a
+watermarked collage is still showing there, the app automatically saves
+a second, clean copy of that same collage to Photos right after the
+purchase completes - by design, so a purchase never leaves you with
+only the watermarked file to notice and re-save yourself. Seeing two
+Photos writes for one Save is expected in that flow, not a bug.
 
 Privacy: the app makes no network requests of its own and has no
 backend. Face and subject framing uses Apple's on-device Vision
@@ -143,7 +150,9 @@ The IAP must be submitted **with** the first version - a new app's in-app purcha
 
 ## Screenshots
 
-`_store/screenshots/01-05.png`, five shots at 1320x2868 (6.9" display). Upload in that order - the first two are what most people ever see. Apple scales these down for smaller devices, so no other size is required.
+`_store/screenshots-v2/01-05.png`, five shots at 1320x2868 (6.9" display) - the spanning/panorama set built by `_store/build_banner.py`, which supersedes the older `_store/screenshots/` set (still on disk but not for upload). Upload in that order - the first two are what most people ever see. Apple scales these down for smaller devices, so no other size is required.
+
+**Before uploading, panel 5 needs to be rebuilt:** its subhead currently reads "Saved under the date the photos were taken," which describes the OLD filing behavior. Saves now sort to the top of the library at export time, with the earliest source photo's date/location written into the file's own EXIF - the same claim the Description already makes correctly ("the collage lands at the top of your library... The earliest source photo's date and location are written into the file's own EXIF"). Fix in `_store/build_banner.py` line 323 (`sub="Saved under the date the photos were taken."`), e.g. `sub="Files at the top of your library, provenance kept in the EXIF."`, then re-run the script and re-export panel 5 - the raw device screenshot underneath (`sc-save.png`) is still accurate and does not need reshooting.
 
 ## Version information
 
