@@ -102,7 +102,6 @@ struct EditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             topBar
-                .overlay(ghostDemoScrim)
             ZStack {
                 // Dead-space deselect (bug fix, Justin 2026-07-17): the
                 // canvas's own gesture surface only extends 40pt beyond the
@@ -161,7 +160,6 @@ struct EditorView: View {
             }
             .animation(.easeInOut(duration: 0.2), value: state.selection != nil)
             EditorBottomBar(state: state, onReplace: { _ in })
-                .overlay(ghostDemoScrim)
         }
         .background(Color.mosaicBackground.ignoresSafeArea())
         #if DEBUG
@@ -173,21 +171,25 @@ struct EditorView: View {
         #endif
         .overlayPreferenceValue(CoachMarkAnchorsKey.self) { anchors in
             // Ghost gesture demo (Justin, 2026-07-26, replaces the old
-            // single-screen spotlight coach marks): reuses the exact same
-            // CoachMarkAnchorsKey geometry CanvasView already exports for
-            // the divider capsule and corner handle (see its "Coach mark
-            // geometry export" section) - just to place a ghost fingertip
-            // AT those live positions instead of punching scrim holes over
-            // them. Because `runGhostGestureDemo` mutates `state.document`
-            // directly on every animation tick, CanvasView's cells (and so
-            // its anchor markers) re-render every tick too, republishing
-            // this preference with the ACTUAL live corner/divider position -
-            // reading `proxy[anchor]` fresh on every render of this closure
-            // is what makes the fingertip track the reshaping layout with no
-            // separate position state of its own to keep in sync.
+            // single-screen spotlight coach marks; reworked again 2026-08-05
+            // for the focus-scrim pass - see CoachMarks.swift's header):
+            // reuses the exact same CoachMarkAnchorsKey geometry CanvasView
+            // already exports for the divider capsule, corner handle, and
+            // (as of the focus-scrim rework) the canvas's own full bounds
+            // (see its "Coach mark geometry export" section) - resolving
+            // each into a screen-space point/rect here rather than inventing
+            // a parallel measurement. Because `runGhostGestureDemo` mutates
+            // `state.document` directly on every animation tick, CanvasView's
+            // cells (and so its anchor markers) re-render every tick too,
+            // republishing this preference with the ACTUAL live corner/
+            // divider/canvas geometry - reading `proxy[anchor]` fresh on
+            // every render of this closure is what makes the fingertip AND
+            // the scrim's cutout track the reshaping layout with no separate
+            // position state of their own to keep in sync.
             // `.ignoresSafeArea()` matches the old coach marks' contract:
-            // this overlay (and its tap-anywhere-skip catcher) covers the
-            // true full screen, header and bottom bar included.
+            // this overlay (and its tap-anywhere-skip catcher, and now its
+            // scrim) covers the true full screen, header and bottom bar
+            // included.
             GeometryReader { proxy in
                 if ghostDemoVisible {
                     let targetAnchor: Anchor<CGRect>? = {
@@ -217,6 +219,15 @@ struct EditorView: View {
                         },
                         isPressed: ghostDemoPressed,
                         captionText: "Watch: drag a corner to reshape, a seam to resize",
+                        // Focus-scrim cutout + caption anchor (Justin,
+                        // 2026-08-05): the canvas anchor resolves in this
+                        // same GeometryReader's coordinate space, same as
+                        // the fingertip above, so the scrim's hole and the
+                        // caption's position line up with the canvas exactly
+                        // - no separate measurement, no clamping needed here
+                        // (GhostGestureOverlay does its own screen clamping
+                        // for the caption).
+                        canvasRect: anchors.canvas.map { proxy[$0] },
                         onSkip: skipGhostDemo
                     )
                 }
@@ -499,22 +510,6 @@ struct EditorView: View {
             guard !Task.isCancelled, !hasSeenCoachMarks else { return }
             await runGhostGestureDemo()
         }
-    }
-
-    /// Focus scrim (Justin, 2026-07-27): while the demo plays, a dark scrim
-    /// dims the header and bottom bar (each applies this as its own
-    /// `.overlay` in `body`) so attention lands on the canvas, which stays
-    /// unscrimmed - the whole point is watching the collage reshape. Purely
-    /// a function of `ghostDemoVisible`, so it fades in/out for free under
-    /// whatever `withAnimation` call is already flipping that flag (demo
-    /// start, natural finish, or skip) - no separate animation wiring
-    /// needed. `allowsHitTesting(false)` so it never competes with
-    /// `GhostGestureOverlay`'s own full-screen tap-anywhere-skip catcher
-    /// (published above via `.overlayPreferenceValue`, which layers on top
-    /// of this entire VStack regardless of where this scrim sits in it).
-    private var ghostDemoScrim: some View {
-        Color.black.opacity(ghostDemoVisible ? 0.6 : 0)
-            .allowsHitTesting(false)
     }
 
     /// Tap-anywhere-skip (GhostGestureOverlay's `onSkip`): cancels the

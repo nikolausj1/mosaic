@@ -47,12 +47,20 @@ struct CoachMarkAnchors {
     var center: Anchor<CGRect>?
     var divider: Anchor<CGRect>?
     var bracket: Anchor<CGRect>?
+    /// The canvas's own full bounds (Justin, 2026-08-05: added for the ghost
+    /// demo's focus scrim rework - see CoachMarks.swift's "Focus scrim"
+    /// section). Unlike the three targets above, this isn't a 44pt hit-zone
+    /// marker; it's the exact rect `canvasContent` occupies, published the
+    /// same anchor-based way so the scrim's cutout tracks a live reshape
+    /// (e.g. the bracket phase growing the canvas) exactly like the fingertip
+    /// already tracks the bracket/divider targets - no separate measurement.
+    var canvas: Anchor<CGRect>?
 }
 
 struct CoachMarkAnchorsKey: PreferenceKey {
-    static var defaultValue = CoachMarkAnchors(center: nil, divider: nil, bracket: nil)
+    static var defaultValue = CoachMarkAnchors(center: nil, divider: nil, bracket: nil, canvas: nil)
 
-    /// Each of the three marker views in `coachMarkAnchorMarkers` sets only
+    /// Each of the four marker views in `coachMarkAnchorMarkers` sets only
     /// one field and leaves the others nil, so a plain "keep whichever side
     /// is already non-nil, else take the incoming one" merge is enough -
     /// no risk of one marker's real value overwriting another's.
@@ -61,6 +69,7 @@ struct CoachMarkAnchorsKey: PreferenceKey {
         if value.center == nil { value.center = next.center }
         if value.divider == nil { value.divider = next.divider }
         if value.bracket == nil { value.bracket = next.bracket }
+        if value.canvas == nil { value.canvas = next.canvas }
     }
 }
 
@@ -451,23 +460,35 @@ struct CanvasView: View {
             Color.clear
                 .frame(width: targets.center.width, height: targets.center.height)
                 .anchorPreference(key: CoachMarkAnchorsKey.self, value: .bounds) { anchor in
-                    CoachMarkAnchors(center: anchor, divider: nil, bracket: nil)
+                    CoachMarkAnchors(center: anchor, divider: nil, bracket: nil, canvas: nil)
                 }
                 .position(x: targets.center.midX, y: targets.center.midY)
             if let rect = targets.divider {
                 Color.clear
                     .frame(width: rect.width, height: rect.height)
                     .anchorPreference(key: CoachMarkAnchorsKey.self, value: .bounds) { anchor in
-                        CoachMarkAnchors(center: nil, divider: anchor, bracket: nil)
+                        CoachMarkAnchors(center: nil, divider: anchor, bracket: nil, canvas: nil)
                     }
                     .position(x: rect.midX, y: rect.midY)
             }
             Color.clear
                 .frame(width: targets.bracket.width, height: targets.bracket.height)
                 .anchorPreference(key: CoachMarkAnchorsKey.self, value: .bounds) { anchor in
-                    CoachMarkAnchors(center: nil, divider: nil, bracket: anchor)
+                    CoachMarkAnchors(center: nil, divider: nil, bracket: anchor, canvas: nil)
                 }
                 .position(x: targets.bracket.midX, y: targets.bracket.midY)
+            // Full canvas bounds (Justin, 2026-08-05, focus scrim rework):
+            // sized and positioned to exactly cover `canvasContent`'s own
+            // frame (state.canvasSize, centered on itself - matching the
+            // border Rectangle/hairline edge drawn at the same size right
+            // above in canvasContent's ZStack) rather than one of the small
+            // 44pt hit-zones above.
+            Color.clear
+                .frame(width: state.canvasSize.width, height: state.canvasSize.height)
+                .anchorPreference(key: CoachMarkAnchorsKey.self, value: .bounds) { anchor in
+                    CoachMarkAnchors(center: nil, divider: nil, bracket: nil, canvas: anchor)
+                }
+                .position(x: state.canvasSize.width / 2, y: state.canvasSize.height / 2)
         }
     }
 
