@@ -2,7 +2,7 @@
 title: "STATUS - Photo Collage"
 created: 2026-07-24
 modified: 2026-08-06
-version: 4.2
+version: 4.3
 author: Claude Fable 5 (claude-fable-5)
 tags:
 ---
@@ -15,7 +15,7 @@ Mosaic, an iOS collage app (the spiritual successor to Instagram's discontinued 
 
 ## Stage
 
-Active Development - **v1.0 (1) submitted to App Review 2026-08-06** (Waiting for Review), the Remove Watermark IAP in the same submission. Subtitle and marketing headline: "Auto layout that finds faces."
+Active Development - **v1.0 (1) resubmitted to App Review 2026-08-06 evening** after a same-day withdraw-fix-resubmit pass: all three pre-mortem risks retired (real UI leads the screenshots, IAP review screenshot recaptured with the live $2.99 price, the "Layout destroyed" name-drop softened). The Remove Watermark IAP rides the same submission. Subtitle and marketing headline: "Auto layout that finds faces."
 
 **Two builds now run side by side on Justin's phone.** `main` is the shippable 1.0 candidate. A second branch installs as "Mosaic Next" under its own bundle ID, carrying everything in `main` plus whatever is being judged by eye, so a taste call never has to be made against the build that ships. The full rule, including why the merge direction is one-way, is in `CLAUDE.md`.
 
@@ -27,8 +27,8 @@ Active Development - **v1.0 (1) submitted to App Review 2026-08-06** (Waiting fo
 
 The submission is in. What remains while Apple reviews:
 
-- [ ] **Decide: swap screenshot panel 1 now or after approval** - the re-rendered panel (new "Auto layout that finds faces." headline plus light-blue-o lockup) is committed at `_store/screenshots-v2/01.png`, but ASC still holds the old render and screenshots are locked while Waiting for Review. Swapping now means remove-from-review, replace, resubmit (~1 day queue cost); after approval, screenshot swaps need no review (~2 min either way)
-- [ ] **TestFlight restore test, still worth doing during review** - buy, restore, watermark gone, clean copy at the top of the library. If anything fails, pull the submission before Apple finds it (~10 min)
+- [ ] **After approval: swap the trailing brand-card screenshot for the re-rendered one** - the new "Auto layout that finds faces." panel is committed at `_store/screenshots-v2/01.png`; ASC still shows the old render (now in LAST position). Screenshot swaps after approval need no review (~2 min)
+- [ ] **TestFlight restore test, still worth doing during review** - buy, restore, watermark gone, clean copy at the top of the library. If anything fails, pull the submission before Apple finds it (~10 min). The sandbox product load is already verified (the paywall showed the real $2.99 on a fresh simulator)
 - [ ] **Sign off the accent color** - mockups in `_review/phase7-accent-*.png` (~5 min)
 - [ ] **Optional: rebuild the app icon in Icon Composer** - polish, not a blocker (~20 min)
 
